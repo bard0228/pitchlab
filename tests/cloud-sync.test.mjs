@@ -71,3 +71,46 @@ test('syncCloudLibrary fetches list and downloads only new zip files', async () 
   assert.equal(downloaded[0].file.name, '新歌.zip');
   assert.equal(new TextDecoder().decode(downloaded[0].arrayBuffer), 'PK\x03\x04test');
 });
+
+test('syncCloudLibrary deduplicates multiple files with the same name', async () => {
+  const downloadIds = [];
+  const fakeZipBytes = Buffer.from('PK\x03\x04dup').toString('base64');
+  const mockFetch = async (url) => {
+    if (url.includes('action=list')) {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          files: [
+            { id: 'dup1', name: '愛你.zip' },
+            { id: 'dup2', name: '愛你.zip' },
+          ],
+        }),
+      };
+    }
+    if (url.includes('action=download')) {
+      const id = new URL(url).searchParams.get('id');
+      downloadIds.push(id);
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          id,
+          name: '愛你.zip',
+          base64: fakeZipBytes,
+        }),
+      };
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const downloaded = await syncCloudLibrary({
+    syncUrl: 'https://script.google.com/macros/s/demo/exec',
+    existingRecords: [],
+    fetchImpl: mockFetch,
+  });
+
+  assert.deepEqual(downloadIds, ['dup1']);
+  assert.equal(downloaded.length, 1);
+});
+

@@ -41,7 +41,9 @@ export async function syncCloudLibrary({
   const cleanUrl = String(syncUrl || '').trim();
   if (!cleanUrl) return [];
 
-  const listRes = await fetchImpl(appendQuery(cleanUrl, { action: 'list' }));
+  const listRes = await fetchImpl(appendQuery(cleanUrl, { action: 'list' }), {
+    redirect: 'follow',
+  });
   if (!listRes.ok) {
     throw new Error(`雲端清單讀取失敗 (${listRes.status})`);
   }
@@ -50,13 +52,22 @@ export async function syncCloudLibrary({
     throw new Error(listJson?.error || '雲端清單格式不符');
   }
 
-  const pending = findNewCloudFiles(listJson.files, existingRecords);
+  const rawPending = findNewCloudFiles(listJson.files, existingRecords);
+  const seenNames = new Set();
+  const pending = rawPending.filter((f) => {
+    const key = String(f.name || f.id);
+    if (seenNames.has(key)) return false;
+    seenNames.add(key);
+    return true;
+  });
   const results = [];
 
   for (let i = 0; i < pending.length; i++) {
     const file = pending[i];
     if (onProgress) onProgress(i + 1, pending.length, file.name);
-    const dlRes = await fetchImpl(appendQuery(cleanUrl, { action: 'download', id: file.id }));
+    const dlRes = await fetchImpl(appendQuery(cleanUrl, { action: 'download', id: file.id }), {
+      redirect: 'follow',
+    });
     if (!dlRes.ok) {
       throw new Error(`下載 ${file.name} 失敗 (${dlRes.status})`);
     }

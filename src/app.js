@@ -361,51 +361,76 @@ function closeLibraryModal() {
 const CLOUD_SYNC_KEY = 'pitchlab_cloud_sync_url';
 elSyncUrlInput.value = localStorage.getItem(CLOUD_SYNC_KEY) || '';
 
-let cloudSyncing = false;
+let cloudSyncPromise = null;
+let cloudSyncStatusMsg = '';
+let lastSyncSummary = '';
+
 async function runCloudSync(showFeedback = false) {
-  if (cloudSyncing) return;
+  if (cloudSyncPromise) {
+    if (showFeedback) {
+      elBtnCloudSync.disabled = true;
+      showLibraryStatus(cloudSyncStatusMsg || '正在檢查雲端硬碟新歌...');
+      await cloudSyncPromise;
+      elBtnCloudSync.disabled = false;
+      if (lastSyncSummary) showLibraryStatus(lastSyncSummary);
+    }
+    return cloudSyncPromise;
+  }
+
   const syncUrl = (elSyncUrlInput.value || localStorage.getItem(CLOUD_SYNC_KEY) || '').trim();
   if (!syncUrl) {
     if (showFeedback) showLibraryStatus('請先貼上 Google Apps Script 雲端同步網址');
     return;
   }
   localStorage.setItem(CLOUD_SYNC_KEY, syncUrl);
-  cloudSyncing = true;
+  cloudSyncStatusMsg = '正在檢查雲端硬碟新歌...';
+  lastSyncSummary = '';
   if (showFeedback) {
     elBtnCloudSync.disabled = true;
-    showLibraryStatus('正在檢查雲端硬碟新歌...');
+    showLibraryStatus(cloudSyncStatusMsg);
   }
-  try {
-    const existing = await listSongRecords();
-    const downloaded = await syncCloudLibrary({
-      syncUrl,
-      existingRecords: existing,
-      onProgress: (idx, total, name) => {
-        if (showFeedback) showLibraryStatus(`正在匯入 (${idx}/${total})：${name}`);
-      },
-    });
-    let added = 0;
-    for (const item of downloaded) {
-      const record = await decodeSongPackageZip(item.arrayBuffer, {
-        driveFileId: item.file.id,
-        sourceFileName: item.file.name,
+
+  cloudSyncPromise = (async () => {
+    try {
+      const existing = await listSongRecords();
+      const downloaded = await syncCloudLibrary({
+        syncUrl,
+        existingRecords: existing,
+        onProgress: (idx, total, name) => {
+          cloudSyncStatusMsg = `正在匯入 (${idx}/${total})：${name}`;
+          if (!elLibraryPortal.hidden) showLibraryStatus(cloudSyncStatusMsg);
+        },
       });
-      await saveSongRecord(record);
-      added++;
-      if (!engine.instBuffer && currentSongId === null) {
-        await loadSavedSong(record);
+      let added = 0;
+      for (const item of downloaded) {
+        const record = await decodeSongPackageZip(item.arrayBuffer, {
+          driveFileId: item.file.id,
+          sourceFileName: item.file.name,
+        });
+        await saveSongRecord(record);
+        added++;
+        if (!engine.instBuffer && currentSongId === null) {
+          await loadSavedSong(record);
+        }
       }
+      await renderSongList();
+      lastSyncSummary = added > 0 ? `已自動匯入 ${added} 首雲端新歌` : '雲端歌庫已是最新';
+      if (showFeedback || !elLibraryPortal.hidden) {
+        showLibraryStatus(lastSyncSummary);
+      }
+    } catch (err) {
+      lastSyncSummary = err?.message || '雲端同步失敗';
+      if (showFeedback || !elLibraryPortal.hidden) {
+        showLibraryStatus(lastSyncSummary);
+      }
+    } finally {
+      cloudSyncStatusMsg = '';
+      cloudSyncPromise = null;
+      elBtnCloudSync.disabled = false;
     }
-    await renderSongList();
-    if (showFeedback) {
-      showLibraryStatus(added > 0 ? `已自動匯入 ${added} 首雲端新歌` : '雲端歌庫已是最新');
-    }
-  } catch (err) {
-    if (showFeedback) showLibraryStatus(err?.message || '雲端同步失敗');
-  } finally {
-    cloudSyncing = false;
-    elBtnCloudSync.disabled = false;
-  }
+  })();
+
+  return cloudSyncPromise;
 }
 
 elBtnLibrary.addEventListener('click', openLibraryModal);
