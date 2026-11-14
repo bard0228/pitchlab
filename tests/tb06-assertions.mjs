@@ -88,9 +88,16 @@ export default async function ({ page, assert }) {
         upLrc: box(document.querySelector('.upload-lrc-btn')),
       };
     });
-    assert(rowCheck.brandMark.width >= 54 && rowCheck.brandMark.height >= 54, `Brand mark not 1.5x: ${rowCheck.brandMark.width}x${rowCheck.brandMark.height}`);
-    assert(rowCheck.brandFontSize >= 22, `Brand title font-size not 1.5x: ${rowCheck.brandFontSize}`);
-    assert(rowCheck.logo.width <= 60 && rowCheck.logo.height <= 60, `Logo too large: ${rowCheck.logo.width}x${rowCheck.logo.height}`);
+    assert(rowCheck.brandMark.width >= 46 && rowCheck.brandMark.height >= 46, `Brand mark size unexpected: ${rowCheck.brandMark.width}x${rowCheck.brandMark.height}`);
+    assert(rowCheck.brandFontSize >= 19, `Brand title font-size unexpected: ${rowCheck.brandFontSize}`);
+    assert(rowCheck.logo.width <= 52 && rowCheck.logo.height <= 52, `Logo too large: ${rowCheck.logo.width}x${rowCheck.logo.height}`);
+
+    const libStyle = await page.evaluate(() => ({
+      hasSearch: Boolean(document.getElementById('song-search')),
+      listMaxH: getComputedStyle(document.getElementById('song-list')).maxHeight,
+    }));
+    assert(libStyle.hasSearch, 'Expected #song-search input inside library modal');
+    assert(libStyle.listMaxH === '292px', `Expected #song-list maxHeight 292px (5 songs), got ${libStyle.listMaxH}`);
     assert(Math.abs(rowCheck.sBack.top - rowCheck.sFwd.top) < 4 && Math.abs(rowCheck.sBack.top - rowCheck.sLoop.top) < 4, 'Transport extras must be in 1 horizontal row');
     assert(Math.abs(rowCheck.abA.top - rowCheck.abB.top) < 4 && Math.abs(rowCheck.abA.top - rowCheck.abC.top) < 4, 'AB buttons must be in 1 horizontal row');
     assert(Math.abs(rowCheck.upSong.top - rowCheck.upLrc.top) < 4 && rowCheck.upSong.right <= rowCheck.upLrc.left, 'Upload buttons must be side-by-side without overlap');

@@ -69,6 +69,7 @@ const elLibraryFrame = document.getElementById('library-frame');
 const elBtnLibraryClose = document.getElementById('btn-library-close');
 const elFileZip = document.getElementById('file-zip');
 const elLibraryStatus = document.getElementById('library-status');
+const elSongSearch = document.getElementById('song-search');
 const elSongList = document.getElementById('song-list');
 const canvas = document.getElementById('pitch-canvas');
 const ctx2d = canvas.getContext('2d');
@@ -265,17 +266,24 @@ async function renderSongList() {
     songs = [];
   }
 
+  const query = (elSongSearch?.value || '').trim().toLowerCase();
+  const filtered = query
+    ? songs.filter((s) =>
+        `${s.title || ''} ${s.artist || ''}`.toLowerCase().includes(query)
+      )
+    : songs;
+
   elSongList.innerHTML = '';
 
-  if (songs.length === 0) {
+  if (filtered.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'library-empty';
-    empty.textContent = '尚無已儲存歌曲，請匯入歌包或於主頁上傳歌曲';
+    empty.textContent = query ? '找不到符合的歌曲' : '尚無已儲存歌曲，請匯入歌包或於主頁上傳歌曲';
     elSongList.appendChild(empty);
     return;
   }
 
-  for (const song of songs) {
+  for (const song of filtered) {
     const row = document.createElement('div');
     row.className = 'song-row';
 
@@ -349,6 +357,9 @@ function closeLibraryModal() {
 
 elBtnLibrary.addEventListener('click', openLibraryModal);
 elBtnLibraryClose.addEventListener('click', closeLibraryModal);
+elSongSearch.addEventListener('input', () => {
+  renderSongList().catch(() => {});
+});
 elLibraryPortal.addEventListener('click', (e) => {
   if (e.target === elLibraryPortal) closeLibraryModal();
 });

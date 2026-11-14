@@ -24,10 +24,10 @@
 }
 
 .brand-mark {
-  width: 57px;
-  height: 57px;
+  width: 48px;
+  height: 48px;
   padding: 2px;
-  border-radius: 16px;
+  border-radius: 14px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.36));
   border: 1px solid rgba(255, 255, 255, 0.85);
   display: grid;
@@ -45,7 +45,7 @@
 }
 
 .brand-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--ink-1);
   line-height: 1.2;
@@ -222,12 +222,12 @@
 }
 
 .mic-btn[aria-pressed="true"] {
-  background: linear-gradient(145deg, rgba(168, 108, 114, 0.92) 0%, rgba(143, 86, 92, 0.95) 100%);
+  background: linear-gradient(145deg, rgba(196, 134, 140, 0.92) 0%, rgba(176, 114, 120, 0.95) 100%);
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.45);
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    0 10px 22px -6px rgba(168, 108, 114, 0.42);
+    0 10px 22px -6px rgba(176, 114, 120, 0.36);
 }
 
 .mic-btn[aria-pressed="true"] .status-dot {
@@ -237,12 +237,12 @@
 }
 
 .toggle-btn.is-active {
-  background: linear-gradient(145deg, rgba(91, 130, 112, 0.9) 0%, rgba(75, 110, 94, 0.94) 100%);
+  background: linear-gradient(145deg, rgba(125, 161, 144, 0.9) 0%, rgba(107, 143, 126, 0.94) 100%);
   border-color: rgba(255, 255, 255, 0.45);
   color: #ffffff;
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    0 10px 20px -6px rgba(91, 130, 112, 0.34);
+    0 10px 20px -6px rgba(107, 143, 126, 0.28);
 }
 
 .toggle-btn.is-active .status-dot {
@@ -286,11 +286,11 @@
   min-height: 56px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 18px;
-  background: linear-gradient(145deg, #5b8270 0%, #4b6e5e 100%);
+  background: linear-gradient(145deg, #7da190 0%, #6b8f7e 100%);
   color: #ffffff;
   display: grid;
   place-items: center;
-  box-shadow: 0 10px 20px -6px rgba(91, 130, 112, 0.42);
+  box-shadow: 0 10px 20px -6px rgba(107, 143, 126, 0.36);
 }
 
 .play-btn[aria-pressed="true"] {
@@ -509,9 +509,27 @@
 
 .import-zip-btn {
   width: 100%;
-  background: linear-gradient(145deg, rgba(91, 130, 112, 0.92), rgba(75, 110, 94, 0.96));
+  background: linear-gradient(145deg, rgba(125, 161, 144, 0.92), rgba(107, 143, 126, 0.96));
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.45);
+}
+
+.song-search-input {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--ink-1);
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.song-search-input::placeholder {
+  color: var(--ink-3);
 }
 
 .upload-grid {
@@ -554,6 +572,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 292px;
   overflow-y: auto;
   padding-right: 2px;
 }
