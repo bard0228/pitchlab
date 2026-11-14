@@ -20,18 +20,25 @@ export class MicPitchTracker {
 
     const isSpeaker = mode === 'speaker';
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const micPromise = navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: isSpeaker,
           noiseSuppression: isSpeaker,
           autoGainControl: false,
         },
       });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('MicTimeout')), 5000)
+      );
+      this.stream = await Promise.race([micPromise, timeoutPromise]);
     } catch (err) {
+      if (err?.message === 'MicTimeout') {
+        throw new Error('麥克風無回應，請改用 Chrome 開啟');
+      }
       if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
         throw new Error('請允許麥克風權限');
       }
-      throw new Error('無法開啟麥克風');
+      throw new Error('無法開啟麥克風，請改用 Chrome 開啟');
     }
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext;

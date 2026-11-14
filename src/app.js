@@ -32,7 +32,9 @@ const elKeyVal = document.getElementById('key-value');
 const elBtnMic = document.getElementById('btn-mic');
 const elLabelMic = document.getElementById('label-mic');
 const elBtnMode = document.getElementById('btn-mode');
+const elLabelMode = document.getElementById('label-mode');
 const elBtnOctave = document.getElementById('btn-octave');
+const elLabelOctave = document.getElementById('label-octave');
 const elLatency = document.getElementById('latency-offset');
 const elLatencyVal = document.getElementById('latency-value');
 const elMicError = document.getElementById('mic-error');
@@ -158,7 +160,7 @@ elBtnOctave.addEventListener('click', () => {
   octaveAgnostic = !octaveAgnostic;
   elBtnOctave.setAttribute('aria-pressed', octaveAgnostic ? 'true' : 'false');
   elBtnOctave.classList.toggle('is-active', octaveAgnostic);
-  elBtnOctave.textContent = octaveAgnostic ? '八度寬容：開' : '八度寬容：關';
+  elLabelOctave.textContent = octaveAgnostic ? '八度寬容：開' : '八度寬容：關';
 });
 
 elBtnMode.addEventListener('click', async () => {
@@ -166,7 +168,7 @@ elBtnMode.addEventListener('click', async () => {
   const isSpeaker = audioMode === 'speaker';
   elBtnMode.setAttribute('aria-pressed', isSpeaker ? 'true' : 'false');
   elBtnMode.classList.toggle('is-active', isSpeaker);
-  elBtnMode.textContent = isSpeaker ? '外放模式' : '耳機模式';
+  elLabelMode.textContent = isSpeaker ? '外放模式' : '耳機模式';
 
   if (micTracker.active) {
     micTracker.stop();
@@ -189,10 +191,12 @@ elBtnMic.addEventListener('click', async () => {
     showMicError('');
     return;
   }
+  elLabelMic.textContent = '啟動麥克風中...';
+  showMicError('');
   try {
     await micTracker.start(audioMode);
     elBtnMic.setAttribute('aria-pressed', 'true');
-    elLabelMic.textContent = '停止收音';
+    elLabelMic.textContent = '麥克風收音中';
     showMicError('');
   } catch (err) {
     elBtnMic.setAttribute('aria-pressed', 'false');
@@ -263,75 +267,89 @@ function updateHudGrade(grade) {
   }
 }
 
+function fillRoundedBar(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.lineTo(x + w - rad, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+  ctx.lineTo(x + w, y + h - rad);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rad, y + h);
+  ctx.lineTo(x + rad, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rad);
+  ctx.lineTo(x, y + rad);
+  ctx.quadraticCurveTo(x, y, x + rad, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawStage() {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 380;
-  const h = canvas.clientHeight || 256;
-  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-  }
-  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx2d.clearRect(0, 0, w, h);
-
-  const minMidi = 45;
-  const maxMidi = 78;
-  const midiToY = (m) => h - 22 - ((m - minMidi) / (maxMidi - minMidi)) * (h - 62);
-
-  // Semitone grid + C3/C4/C5 labels
-  ctx2d.font = '600 10px "Plus Jakarta Sans", sans-serif';
-  ctx2d.textBaseline = 'middle';
-  for (let m = minMidi; m <= maxMidi; m += 2) {
-    const y = midiToY(m);
-    const isOctaveC = m % 12 === 0;
-    ctx2d.lineWidth = 1;
-    ctx2d.strokeStyle = isOctaveC ? 'rgba(148, 163, 184, 0.24)' : 'rgba(148, 163, 184, 0.08)';
-    ctx2d.beginPath();
-    ctx2d.moveTo(28, y);
-    ctx2d.lineTo(w, y);
-    ctx2d.stroke();
-
-    if (isOctaveC) {
-      ctx2d.fillStyle = 'rgba(148, 163, 184, 0.65)';
-      ctx2d.fillText(midiToNoteName(m), 6, y);
+  requestAnimationFrame(drawStage);
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 380;
+    const h = canvas.clientHeight || 256;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
     }
-  }
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2d.clearRect(0, 0, w, h);
 
-  const nowSec = engine.getCurrentTime();
-  if (!isScrubbing && engine.durationSec > 0) {
-    elScrub.value = String(nowSec);
-    elTimeCur.textContent = formatTime(nowSec);
-  }
+    const minMidi = 45;
+    const maxMidi = 78;
+    const midiToY = (m) => h - 22 - ((m - minMidi) / (maxMidi - minMidi)) * (h - 62);
 
-  if (engine.isPlaying && engine.getFrequencyData(freqBins)) {
-    const barCount = 32;
-    const barW = (w - 30) / barCount;
-    ctx2d.fillStyle = 'rgba(91, 130, 112, 0.22)';
-    for (let i = 0; i < barCount; i++) {
-      const val = freqBins[i] / 255;
-      const bh = val * 36;
-      ctx2d.fillRect(30 + i * barW + 2, h - bh, Math.max(2, barW - 4), bh);
+    ctx2d.font = '600 10px "Plus Jakarta Sans", sans-serif';
+    ctx2d.textBaseline = 'middle';
+    for (let m = minMidi; m <= maxMidi; m += 2) {
+      const y = midiToY(m);
+      const isOctaveC = m % 12 === 0;
+      ctx2d.lineWidth = 1;
+      ctx2d.strokeStyle = isOctaveC ? 'rgba(148, 163, 184, 0.24)' : 'rgba(148, 163, 184, 0.08)';
+      ctx2d.beginPath();
+      ctx2d.moveTo(28, y);
+      ctx2d.lineTo(w, y);
+      ctx2d.stroke();
+
+      if (isOctaveC) {
+        ctx2d.fillStyle = 'rgba(148, 163, 184, 0.65)';
+        ctx2d.fillText(midiToNoteName(m), 6, y);
+      }
     }
-  }
 
-  const playheadX = w * 0.3;
-  const pxPerSec = 72;
+    const nowSec = engine.getCurrentTime();
+    if (!isScrubbing && engine.durationSec > 0) {
+      elScrub.value = String(nowSec);
+      elTimeCur.textContent = formatTime(nowSec);
+    }
 
-  // Target Pitch Curve bars (shifted by Pitch Transpose + Latency Offset)
-  for (const note of currentMelody) {
-    const shiftedMidi = note.midi + engine.semitones;
-    const visualOffsetSec = latencyOffsetMs / 1000;
-    const x1 = playheadX + (note.start - visualOffsetSec - nowSec) * pxPerSec;
-    const x2 = playheadX + (note.end - visualOffsetSec - nowSec) * pxPerSec;
-    if (x2 < 28 || x1 > w + 10) continue;
+    if (engine.isPlaying && engine.getFrequencyData(freqBins)) {
+      const barCount = 32;
+      const barW = (w - 30) / barCount;
+      ctx2d.fillStyle = 'rgba(91, 130, 112, 0.22)';
+      for (let i = 0; i < barCount; i++) {
+        const val = freqBins[i] / 255;
+        const bh = val * 36;
+        ctx2d.fillRect(30 + i * barW + 2, h - bh, Math.max(2, barW - 4), bh);
+      }
+    }
 
-    const y = midiToY(shiftedMidi);
-    const active = nowSec + visualOffsetSec >= note.start && nowSec + visualOffsetSec < note.end;
-    ctx2d.fillStyle = active ? 'rgba(96, 165, 250, 0.92)' : 'rgba(96, 165, 250, 0.42)';
-    ctx2d.beginPath();
-    ctx2d.roundRect(Math.max(28, x1), y - 6, Math.max(6, x2 - Math.max(28, x1) - 2), 12, 6);
-    ctx2d.fill();
-  }
+    const playheadX = w * 0.3;
+    const pxPerSec = 72;
+
+    for (const note of currentMelody) {
+      const shiftedMidi = note.midi + engine.semitones;
+      const visualOffsetSec = latencyOffsetMs / 1000;
+      const x1 = playheadX + (note.start - visualOffsetSec - nowSec) * pxPerSec;
+      const x2 = playheadX + (note.end - visualOffsetSec - nowSec) * pxPerSec;
+      if (x2 < 28 || x1 > w + 10) continue;
+
+      const y = midiToY(shiftedMidi);
+      const active = nowSec + visualOffsetSec >= note.start && nowSec + visualOffsetSec < note.end;
+      ctx2d.fillStyle = active ? 'rgba(96, 165, 250, 0.92)' : 'rgba(96, 165, 250, 0.42)';
+      fillRoundedBar(ctx2d, Math.max(28, x1), y - 6, Math.max(6, x2 - Math.max(28, x1) - 2), 12, 6);
+    }
 
   // Live microphone pitch detection & deviation calculation
   const liveSample = injectedTestFreq
@@ -406,15 +424,16 @@ function drawStage() {
     ctx2d.stroke();
   }
 
-  // Playhead line
-  ctx2d.strokeStyle = 'rgba(248, 250, 252, 0.65)';
-  ctx2d.lineWidth = 2;
-  ctx2d.beginPath();
-  ctx2d.moveTo(playheadX, 38);
-  ctx2d.lineTo(playheadX, h - 8);
-  ctx2d.stroke();
-
-  requestAnimationFrame(drawStage);
+    // Playhead line
+    ctx2d.strokeStyle = 'rgba(248, 250, 252, 0.65)';
+    ctx2d.lineWidth = 2;
+    ctx2d.beginPath();
+    ctx2d.moveTo(playheadX, 38);
+    ctx2d.lineTo(playheadX, h - 8);
+    ctx2d.stroke();
+  } catch (err) {
+    console.error('drawStage error:', err);
+  }
 }
 
 attachAndroidEdgeStretch(
