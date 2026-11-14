@@ -13,6 +13,13 @@ import {
   melodyToPitchCurve,
 } from './pitch-judge.js';
 import { MicPitchTracker } from './mic-pitch.js';
+import {
+  decodeSongPackageZip,
+  deleteSongRecord,
+  getSongRecord,
+  listSongRecords,
+  saveSongRecord,
+} from './song-library.js';
 
 const engine = new DualDeckEngine();
 const micTracker = new MicPitchTracker();
@@ -45,10 +52,18 @@ const elFileInst = document.getElementById('file-inst');
 const elFileVocal = document.getElementById('file-vocal');
 const elLabelInst = document.getElementById('label-inst');
 const elLabelVocal = document.getElementById('label-vocal');
+const elBtnLibrary = document.getElementById('btn-library');
+const elLibraryPortal = document.getElementById('library-portal');
+const elLibraryFrame = document.getElementById('library-frame');
+const elBtnLibraryClose = document.getElementById('btn-library-close');
+const elFileZip = document.getElementById('file-zip');
+const elLibraryStatus = document.getElementById('library-status');
+const elSongList = document.getElementById('song-list');
 const canvas = document.getElementById('pitch-canvas');
 const ctx2d = canvas.getContext('2d');
 
 let fixtureLoaded = false;
+let currentSongId = 'builtin-fixture';
 let currentMelody = FIXTURE_MELODY;
 let currentPitchCurve = melodyToPitchCurve(FIXTURE_MELODY, FIXTURE_DURATION_SEC, 10);
 let customInstFile = null;
@@ -59,13 +74,16 @@ let audioMode = 'headphone';
 let latencyOffsetMs = Number(localStorage.getItem('pitchlab_latency_ms') || 0);
 let injectedTestFreq = null;
 
-// Live pitch trail points: { timeSec, midi, grade }
 const liveTrail = [];
 let totalJudgedFrames = 0;
 let greenJudgedFrames = 0;
 const freqBins = new Uint8Array(128);
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
 
 function midiToNoteName(midi) {
   const m = Math.round(midi);
@@ -98,6 +116,18 @@ function showMicError(msg) {
   elMicError.style.display = 'block';
 }
 
+function showLibraryStatus(msg) {
+  if (!msg) {
+    elLibraryStatus.hidden = true;
+    elLibraryStatus.style.display = 'none';
+    elLibraryStatus.textContent = '';
+    return;
+  }
+  elLibraryStatus.textContent = msg;
+  elLibraryStatus.hidden = false;
+  elLibraryStatus.style.display = 'block';
+}
+
 function updateLatencyUI(ms) {
   latencyOffsetMs = Math.max(-300, Math.min(300, Math.round(ms)));
   elLatency.value = String(latencyOffsetMs);
@@ -107,17 +137,182 @@ function updateLatencyUI(ms) {
 
 updateLatencyUI(latencyOffsetMs);
 
-async function ensureFixtureLoaded() {
-  if (fixtureLoaded) return;
+function resetStatsAndTrail() {
+  liveTrail.length = 0;
+  totalJudgedFrames = 0;
+  greenJudgedFrames = 0;
+  elHudAccuracy.textContent = '準確率 --%';
+}
+
+async function loadBuiltinFixture() {
   await engine.ensureContext();
   const fixture = generateDualStemFixture(engine.ctx);
   engine.loadBuffers(fixture.instBuffer, fixture.vocalBuffer);
+  currentSongId = 'builtin-fixture';
   currentMelody = fixture.melody;
   currentPitchCurve = melodyToPitchCurve(fixture.melody, fixture.durationSec, 10);
+  resetStatsAndTrail();
   elScrub.max = String(fixture.durationSec);
+  elScrub.value = '0';
+  elTimeCur.textContent = '00:00';
   elTimeTot.textContent = formatTime(fixture.durationSec);
+  setPlayUI(false);
   fixtureLoaded = true;
 }
+
+async function loadSavedSong(record) {
+  await engine.ensureContext();
+  const [instBuf, vocBuf] = await Promise.all([
+    engine.ctx.decodeAudioData(record.instBytes.slice(0)),
+    engine.ctx.decodeAudioData(record.vocalBytes.slice(0)),
+  ]);
+  engine.loadBuffers(instBuf, vocBuf);
+  currentSongId = record.id;
+  currentMelody = [];
+  currentPitchCurve = record.pitchCurve || null;
+  resetStatsAndTrail();
+  elScrub.max = String(engine.durationSec);
+  elScrub.value = '0';
+  elTimeCur.textContent = '00:00';
+  elTimeTot.textContent = formatTime(engine.durationSec);
+  setPlayUI(false);
+  fixtureLoaded = true;
+  localStorage.setItem('pitchlab_last_song_id', record.id);
+}
+
+async function ensureFixtureLoaded() {
+  if (fixtureLoaded) return;
+  const lastId = localStorage.getItem('pitchlab_last_song_id');
+  if (lastId && lastId !== 'builtin-fixture') {
+    try {
+      const rec = await getSongRecord(lastId);
+      if (rec) {
+        await loadSavedSong(rec);
+        return;
+      }
+    } catch {}
+  }
+  await loadBuiltinFixture();
+}
+
+async function renderSongList() {
+  let songs = [];
+  try {
+    songs = await listSongRecords();
+  } catch {
+    songs = [];
+  }
+
+  elSongList.innerHTML = '';
+
+  const makeRow = (id, title, durationSec, deletable) => {
+    const row = document.createElement('div');
+    row.className = 'song-row';
+
+    const selBtn = document.createElement('button');
+    selBtn.type = 'button';
+    selBtn.className = `lg-btn song-select-btn${currentSongId === id ? ' is-current' : ''}`;
+    selBtn.dataset.songId = id;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'song-name';
+    nameSpan.textContent = title;
+
+    const durSpan = document.createElement('span');
+    durSpan.className = 'song-dur tabular-nums';
+    durSpan.textContent = formatTime(durationSec);
+
+    selBtn.appendChild(nameSpan);
+    selBtn.appendChild(durSpan);
+
+    selBtn.addEventListener('click', async () => {
+      try {
+        showLibraryStatus('');
+        if (id === 'builtin-fixture') {
+          localStorage.setItem('pitchlab_last_song_id', 'builtin-fixture');
+          await loadBuiltinFixture();
+        } else {
+          const rec = await getSongRecord(id);
+          if (rec) await loadSavedSong(rec);
+        }
+        closeLibraryModal();
+      } catch (err) {
+        showLibraryStatus(err.message || '載入歌曲失敗');
+      }
+    });
+
+    row.appendChild(selBtn);
+
+    if (deletable) {
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'lg-btn song-del-btn';
+      delBtn.setAttribute('aria-label', `刪除 ${title}`);
+      delBtn.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+      delBtn.addEventListener('click', async () => {
+        await deleteSongRecord(id);
+        if (currentSongId === id) {
+          localStorage.setItem('pitchlab_last_song_id', 'builtin-fixture');
+          fixtureLoaded = false;
+          currentSongId = 'builtin-fixture';
+        }
+        await renderSongList();
+      });
+      row.appendChild(delBtn);
+    }
+
+    elSongList.appendChild(row);
+  };
+
+  makeRow('builtin-fixture', '內建練習曲', FIXTURE_DURATION_SEC, false);
+  for (const song of songs) {
+    makeRow(song.id, song.title, (song.durationMs || 0) / 1000, true);
+  }
+}
+
+async function openLibraryModal() {
+  showLibraryStatus('');
+  await renderSongList();
+  elLibraryPortal.hidden = false;
+  elLibraryPortal.style.display = 'flex';
+  elLibraryFrame.classList.remove('lg-pop-exit');
+  elLibraryFrame.classList.add('lg-pop-enter');
+}
+
+function closeLibraryModal() {
+  elLibraryFrame.classList.remove('lg-pop-enter');
+  elLibraryFrame.classList.add('lg-pop-exit');
+  setTimeout(() => {
+    elLibraryPortal.hidden = true;
+    elLibraryPortal.style.display = 'none';
+    elLibraryFrame.classList.remove('lg-pop-exit');
+  }, 190);
+}
+
+elBtnLibrary.addEventListener('click', openLibraryModal);
+elBtnLibraryClose.addEventListener('click', closeLibraryModal);
+elLibraryPortal.addEventListener('click', (e) => {
+  if (e.target === elLibraryPortal) closeLibraryModal();
+});
+
+elFileZip.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  showLibraryStatus('');
+  try {
+    const ab = await file.arrayBuffer();
+    const record = await decodeSongPackageZip(ab);
+    await saveSongRecord(record);
+    await loadSavedSong(record);
+    await renderSongList();
+    closeLibraryModal();
+  } catch (err) {
+    showLibraryStatus(err.message || '歌包匯入失敗');
+  } finally {
+    elFileZip.value = '';
+  }
+});
 
 elPlay.addEventListener('click', async () => {
   if (engine.isPlaying) {
@@ -227,11 +422,10 @@ async function tryLoadCustomStems() {
   ]);
   engine.loadBuffers(instBuf, vocBuf);
   fixtureLoaded = true;
+  currentSongId = 'custom-local';
   currentMelody = [];
   currentPitchCurve = null;
-  liveTrail.length = 0;
-  totalJudgedFrames = 0;
-  greenJudgedFrames = 0;
+  resetStatsAndTrail();
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';
@@ -255,7 +449,6 @@ elFileVocal.addEventListener('change', (e) => {
   tryLoadCustomStems();
 });
 
-// Testing hook for deterministic E2E pitch rendering verification
 window.__pitchLabInjectSample = (freqHz) => {
   injectedTestFreq = freqHz;
 };
@@ -337,94 +530,128 @@ function drawStage() {
 
     const playheadX = w * 0.3;
     const pxPerSec = 72;
+    const visualOffsetSec = latencyOffsetMs / 1000;
 
-    for (const note of currentMelody) {
-      const shiftedMidi = note.midi + engine.semitones;
-      const visualOffsetSec = latencyOffsetMs / 1000;
-      const x1 = playheadX + (note.start - visualOffsetSec - nowSec) * pxPerSec;
-      const x2 = playheadX + (note.end - visualOffsetSec - nowSec) * pxPerSec;
-      if (x2 < 28 || x1 > w + 10) continue;
+    if (currentMelody.length > 0) {
+      for (const note of currentMelody) {
+        const shiftedMidi = note.midi + engine.semitones;
+        const x1 = playheadX + (note.start - visualOffsetSec - nowSec) * pxPerSec;
+        const x2 = playheadX + (note.end - visualOffsetSec - nowSec) * pxPerSec;
+        if (x2 < 28 || x1 > w + 10) continue;
 
-      const y = midiToY(shiftedMidi);
-      const active = nowSec + visualOffsetSec >= note.start && nowSec + visualOffsetSec < note.end;
-      ctx2d.fillStyle = active ? 'rgba(96, 165, 250, 0.92)' : 'rgba(96, 165, 250, 0.42)';
-      fillRoundedBar(ctx2d, Math.max(28, x1), y - 6, Math.max(6, x2 - Math.max(28, x1) - 2), 12, 6);
+        const y = midiToY(shiftedMidi);
+        const active = nowSec + visualOffsetSec >= note.start && nowSec + visualOffsetSec < note.end;
+        ctx2d.fillStyle = active ? 'rgba(96, 165, 250, 0.92)' : 'rgba(96, 165, 250, 0.42)';
+        fillRoundedBar(ctx2d, Math.max(28, x1), y - 6, Math.max(6, x2 - Math.max(28, x1) - 2), 12, 6);
+      }
+    } else if (currentPitchCurve && Array.isArray(currentPitchCurve.f0Hz)) {
+      const hopSec = currentPitchCurve.hopMs / 1000;
+      const startTime = nowSec + visualOffsetSec - (playheadX - 28) / pxPerSec;
+      const endTime = nowSec + visualOffsetSec + (w - playheadX) / pxPerSec;
+      const startIdx = Math.max(0, Math.floor(startTime / hopSec));
+      const endIdx = Math.min(currentPitchCurve.f0Hz.length - 1, Math.ceil(endTime / hopSec));
+
+      ctx2d.strokeStyle = 'rgba(96, 165, 250, 0.72)';
+      ctx2d.lineWidth = 6;
+      ctx2d.lineCap = 'round';
+      ctx2d.lineJoin = 'round';
+      ctx2d.beginPath();
+      let drawing = false;
+      let prevMidi = null;
+
+      for (let i = startIdx; i <= endIdx; i += 2) {
+        const hz = currentPitchCurve.f0Hz[i];
+        if (!hz || hz <= 0) {
+          drawing = false;
+          prevMidi = null;
+          continue;
+        }
+        const shiftedMidi = Math.max(minMidi, Math.min(maxMidi, freqToMidi(hz) + engine.semitones));
+        const tSec = i * hopSec;
+        const x = playheadX + (tSec - visualOffsetSec - nowSec) * pxPerSec;
+        const y = midiToY(shiftedMidi);
+        if (!drawing || (prevMidi !== null && Math.abs(shiftedMidi - prevMidi) > 4)) {
+          ctx2d.moveTo(x, y);
+          drawing = true;
+        } else {
+          ctx2d.lineTo(x, y);
+        }
+        prevMidi = shiftedMidi;
+      }
+      ctx2d.stroke();
     }
 
-  // Live microphone pitch detection & deviation calculation
-  const liveSample = injectedTestFreq
-    ? { freq: injectedTestFreq, clarity: 0.99 }
-    : micTracker.samplePitch();
+    const liveSample = injectedTestFreq
+      ? { freq: injectedTestFreq, clarity: 0.99 }
+      : micTracker.samplePitch();
 
-  if (liveSample) {
-    const liveMidi = freqToMidi(liveSample.freq);
-    elHudLive.textContent = `目前 ${midiToNoteName(liveMidi)}`;
+    if (liveSample) {
+      const liveMidi = freqToMidi(liveSample.freq);
+      elHudLive.textContent = `目前 ${midiToNoteName(liveMidi)}`;
 
-    const targetHz = lookupTargetPitchAtTime(currentPitchCurve, nowSec, latencyOffsetMs);
-    let grade = 'neutral';
-    if (targetHz) {
-      const dev = computePitchDeviationCents(
-        liveSample.freq,
-        targetHz,
-        engine.semitones,
-        octaveAgnostic
-      );
-      if (dev) {
-        grade = dev.grade;
-        const sign = dev.cents > 0 ? '+' : '';
-        elHudCents.textContent = `偏差 ${sign}${dev.cents} 音分`;
-        updateHudGrade(dev.grade);
+      const targetHz = lookupTargetPitchAtTime(currentPitchCurve, nowSec, latencyOffsetMs);
+      let grade = 'neutral';
+      if (targetHz) {
+        const dev = computePitchDeviationCents(
+          liveSample.freq,
+          targetHz,
+          engine.semitones,
+          octaveAgnostic
+        );
+        if (dev) {
+          grade = dev.grade;
+          const sign = dev.cents > 0 ? '+' : '';
+          elHudCents.textContent = `偏差 ${sign}${dev.cents} 音分`;
+          updateHudGrade(dev.grade);
 
-        totalJudgedFrames++;
-        if (dev.grade === 'green') greenJudgedFrames++;
-        const acc = Math.round((greenJudgedFrames / totalJudgedFrames) * 100);
-        elHudAccuracy.textContent = `準確率 ${acc}%`;
+          totalJudgedFrames++;
+          if (dev.grade === 'green') greenJudgedFrames++;
+          const acc = Math.round((greenJudgedFrames / totalJudgedFrames) * 100);
+          elHudAccuracy.textContent = `準確率 ${acc}%`;
+        }
+      } else {
+        elHudCents.textContent = '偏差 --';
+        updateHudGrade(null);
       }
+
+      const displayMidi = Math.max(minMidi, Math.min(maxMidi, liveMidi));
+      liveTrail.push({ timeSec: nowSec, midi: displayMidi, grade });
+      if (liveTrail.length > 240) liveTrail.shift();
     } else {
+      elHudLive.textContent = '目前 --';
       elHudCents.textContent = '偏差 --';
       updateHudGrade(null);
+      if (liveTrail.length > 0 && liveTrail[liveTrail.length - 1] !== null) {
+        liveTrail.push(null);
+      }
     }
 
-    const displayMidi = Math.max(minMidi, Math.min(maxMidi, liveMidi));
-    liveTrail.push({ timeSec: nowSec, midi: displayMidi, grade });
-    if (liveTrail.length > 240) liveTrail.shift();
-  } else {
-    elHudLive.textContent = '目前 --';
-    elHudCents.textContent = '偏差 --';
-    updateHudGrade(null);
-    if (liveTrail.length > 0 && liveTrail[liveTrail.length - 1] !== null) {
-      liveTrail.push(null);
+    const colorMap = {
+      green: '#4ade80',
+      amber: '#fbbf24',
+      red: '#f87171',
+      neutral: '#93c5fd',
+    };
+    ctx2d.lineWidth = 3;
+    ctx2d.lineCap = 'round';
+    ctx2d.lineJoin = 'round';
+
+    for (let i = 1; i < liveTrail.length; i++) {
+      const prev = liveTrail[i - 1];
+      const curr = liveTrail[i];
+      if (!prev || !curr) continue;
+      const x1 = playheadX + (prev.timeSec - nowSec) * pxPerSec;
+      const x2 = playheadX + (curr.timeSec - nowSec) * pxPerSec;
+      if (x2 < 28 || x1 > w) continue;
+      if (Math.abs(x2 - x1) > 25) continue;
+
+      ctx2d.strokeStyle = colorMap[curr.grade] || colorMap.neutral;
+      ctx2d.beginPath();
+      ctx2d.moveTo(x1, midiToY(prev.midi));
+      ctx2d.lineTo(x2, midiToY(curr.midi));
+      ctx2d.stroke();
     }
-  }
 
-  // Render glowing live singing trail
-  const colorMap = {
-    green: '#4ade80',
-    amber: '#fbbf24',
-    red: '#f87171',
-    neutral: '#93c5fd',
-  };
-  ctx2d.lineWidth = 3;
-  ctx2d.lineCap = 'round';
-  ctx2d.lineJoin = 'round';
-
-  for (let i = 1; i < liveTrail.length; i++) {
-    const prev = liveTrail[i - 1];
-    const curr = liveTrail[i];
-    if (!prev || !curr) continue;
-    const x1 = playheadX + (prev.timeSec - nowSec) * pxPerSec;
-    const x2 = playheadX + (curr.timeSec - nowSec) * pxPerSec;
-    if (x2 < 28 || x1 > w) continue;
-    if (Math.abs(x2 - x1) > 25) continue;
-
-    ctx2d.strokeStyle = colorMap[curr.grade] || colorMap.neutral;
-    ctx2d.beginPath();
-    ctx2d.moveTo(x1, midiToY(prev.midi));
-    ctx2d.lineTo(x2, midiToY(curr.midi));
-    ctx2d.stroke();
-  }
-
-    // Playhead line
     ctx2d.strokeStyle = 'rgba(248, 250, 252, 0.65)';
     ctx2d.lineWidth = 2;
     ctx2d.beginPath();

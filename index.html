@@ -24,6 +24,12 @@
         </div>
         <span class="brand-title">台灣好聲音</span>
       </div>
+      <button id="btn-library" class="lg-btn lg-glass-btn top-action-btn" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+        </svg>
+        <span id="label-library">歌庫</span>
+      </button>
     </header>
 
     <section class="lg-ice-frame pitch-stage-wrap" aria-label="音準舞台">
@@ -142,6 +148,38 @@
       </div>
     </section>
   </main>
+
+  <div id="library-portal" class="portal-backdrop" hidden style="display: none;" role="dialog" aria-modal="true" aria-labelledby="library-title">
+    <div id="library-frame" class="lg-ice-frame portal-frame">
+      <div class="lg-inner-glass portal-inner">
+        <div class="portal-head">
+          <h2 id="library-title" class="portal-title">離線歌庫</h2>
+          <button id="btn-library-close" class="lg-btn icon-close-btn" type="button" aria-label="關閉歌庫">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="portal-actions">
+          <label class="lg-btn lg-glass-btn import-zip-btn" for="file-zip">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span id="label-import-zip">匯入歌包 (.zip)</span>
+            <input id="file-zip" class="sr-only" type="file" accept=".zip,application/zip" />
+          </label>
+        </div>
+
+        <div id="library-status" class="library-status" hidden style="display: none;"></div>
+
+        <div id="song-list" class="song-list"></div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="./src/app.js"></script>
 </body>
