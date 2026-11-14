@@ -5,12 +5,10 @@ import {
   freqToMidi,
 } from './audio-math.js';
 import { DualDeckEngine } from './dual-deck.js';
-import { FIXTURE_DURATION_SEC, FIXTURE_MELODY, generateDualStemFixture } from './fixture-gen.js';
 import { attachAndroidEdgeStretch } from './android-overscroll.js';
 import {
   computePitchDeviationCents,
   lookupTargetPitchAtTime,
-  melodyToPitchCurve,
   quantizePitchCurveToNotes,
 } from './pitch-judge.js';
 import { MicPitchTracker } from './mic-pitch.js';
@@ -62,10 +60,9 @@ const elSongList = document.getElementById('song-list');
 const canvas = document.getElementById('pitch-canvas');
 const ctx2d = canvas.getContext('2d');
 
-let fixtureLoaded = false;
-let currentSongId = 'builtin-fixture';
-let currentMelody = FIXTURE_MELODY;
-let currentPitchCurve = melodyToPitchCurve(FIXTURE_MELODY, FIXTURE_DURATION_SEC, 10);
+let currentSongId = null;
+let currentMelody = [];
+let currentPitchCurve = null;
 let isScrubbing = false;
 let octaveAgnostic = true;
 let audioMode = 'headphone';
@@ -142,22 +139,6 @@ function resetStatsAndTrail() {
   elHudAccuracy.textContent = '準確率 --%';
 }
 
-async function loadBuiltinFixture() {
-  await engine.ensureContext();
-  const fixture = generateDualStemFixture(engine.ctx);
-  engine.loadBuffers(fixture.instBuffer, fixture.vocalBuffer);
-  currentSongId = 'builtin-fixture';
-  currentMelody = fixture.melody;
-  currentPitchCurve = melodyToPitchCurve(fixture.melody, fixture.durationSec, 10);
-  resetStatsAndTrail();
-  elScrub.max = String(fixture.durationSec);
-  elScrub.value = '0';
-  elTimeCur.textContent = '00:00';
-  elTimeTot.textContent = formatTime(fixture.durationSec);
-  setPlayUI(false);
-  fixtureLoaded = true;
-}
-
 async function loadSavedSong(record) {
   await engine.ensureContext();
   const [instBuf, vocBuf] = await Promise.all([
@@ -174,23 +155,22 @@ async function loadSavedSong(record) {
   elTimeCur.textContent = '00:00';
   elTimeTot.textContent = formatTime(engine.durationSec);
   setPlayUI(false);
-  fixtureLoaded = true;
   localStorage.setItem('pitchlab_last_song_id', record.id);
 }
 
-async function ensureFixtureLoaded() {
-  if (fixtureLoaded) return;
+async function restoreLastSavedSongIfAny() {
+  if (engine.instBuffer) return true;
   const lastId = localStorage.getItem('pitchlab_last_song_id');
-  if (lastId && lastId !== 'builtin-fixture') {
+  if (lastId) {
     try {
       const rec = await getSongRecord(lastId);
       if (rec) {
         await loadSavedSong(rec);
-        return;
+        return true;
       }
     } catch {}
   }
-  await loadBuiltinFixture();
+  return false;
 }
 
 async function renderSongList() {
@@ -203,22 +183,30 @@ async function renderSongList() {
 
   elSongList.innerHTML = '';
 
-  const makeRow = (id, title, durationSec, deletable) => {
+  if (songs.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'library-empty';
+    empty.textContent = '尚無已儲存歌曲，請匯入歌包或於主頁上傳歌曲';
+    elSongList.appendChild(empty);
+    return;
+  }
+
+  for (const song of songs) {
     const row = document.createElement('div');
     row.className = 'song-row';
 
     const selBtn = document.createElement('button');
     selBtn.type = 'button';
-    selBtn.className = `lg-btn song-select-btn${currentSongId === id ? ' is-current' : ''}`;
-    selBtn.dataset.songId = id;
+    selBtn.className = `lg-btn song-select-btn${currentSongId === song.id ? ' is-current' : ''}`;
+    selBtn.dataset.songId = song.id;
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'song-name';
-    nameSpan.textContent = title;
+    nameSpan.textContent = song.title;
 
     const durSpan = document.createElement('span');
     durSpan.className = 'song-dur tabular-nums';
-    durSpan.textContent = formatTime(durationSec);
+    durSpan.textContent = formatTime((song.durationMs || 0) / 1000);
 
     selBtn.appendChild(nameSpan);
     selBtn.appendChild(durSpan);
@@ -226,13 +214,8 @@ async function renderSongList() {
     selBtn.addEventListener('click', async () => {
       try {
         showLibraryStatus('');
-        if (id === 'builtin-fixture') {
-          localStorage.setItem('pitchlab_last_song_id', 'builtin-fixture');
-          await loadBuiltinFixture();
-        } else {
-          const rec = await getSongRecord(id);
-          if (rec) await loadSavedSong(rec);
-        }
+        const rec = await getSongRecord(song.id);
+        if (rec) await loadSavedSong(rec);
         closeLibraryModal();
       } catch (err) {
         showLibraryStatus(err.message || '載入歌曲失敗');
@@ -241,31 +224,23 @@ async function renderSongList() {
 
     row.appendChild(selBtn);
 
-    if (deletable) {
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'lg-btn song-del-btn';
-      delBtn.setAttribute('aria-label', `刪除 ${title}`);
-      delBtn.innerHTML =
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
-      delBtn.addEventListener('click', async () => {
-        await deleteSongRecord(id);
-        if (currentSongId === id) {
-          localStorage.setItem('pitchlab_last_song_id', 'builtin-fixture');
-          fixtureLoaded = false;
-          currentSongId = 'builtin-fixture';
-        }
-        await renderSongList();
-      });
-      row.appendChild(delBtn);
-    }
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'lg-btn song-del-btn';
+    delBtn.setAttribute('aria-label', `刪除 ${song.title}`);
+    delBtn.innerHTML =
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+    delBtn.addEventListener('click', async () => {
+      await deleteSongRecord(song.id);
+      if (currentSongId === song.id) {
+        localStorage.removeItem('pitchlab_last_song_id');
+        currentSongId = null;
+      }
+      await renderSongList();
+    });
+    row.appendChild(delBtn);
 
     elSongList.appendChild(row);
-  };
-
-  makeRow('builtin-fixture', '內建練習曲', FIXTURE_DURATION_SEC, false);
-  for (const song of songs) {
-    makeRow(song.id, song.title, (song.durationMs || 0) / 1000, true);
   }
 }
 
@@ -318,7 +293,12 @@ elPlay.addEventListener('click', async () => {
     setPlayUI(false);
     return;
   }
-  await ensureFixtureLoaded();
+  const hasSong = await restoreLastSavedSongIfAny();
+  if (!hasSong) {
+    showMicError('請先上傳歌曲或從歌庫選擇歌包');
+    return;
+  }
+  showMicError('');
   const ok = await engine.play();
   setPlayUI(ok);
 });
@@ -407,8 +387,10 @@ elScrub.addEventListener('input', () => {
 elScrub.addEventListener('change', async () => {
   isScrubbing = false;
   const targetSec = Number(elScrub.value);
-  await ensureFixtureLoaded();
-  engine.seek(targetSec);
+  const hasSong = await restoreLastSavedSongIfAny();
+  if (hasSong) {
+    engine.seek(targetSec);
+  }
 });
 
 elFileSong.addEventListener('change', async (e) => {
@@ -425,7 +407,6 @@ elFileSong.addEventListener('change', async (e) => {
     );
 
     engine.loadBuffers(instBuffer, vocalBuffer);
-    fixtureLoaded = true;
     currentSongId = 'instant-web';
     currentPitchCurve = pitchCurve;
     currentMelody = quantizePitchCurveToNotes(pitchCurve);

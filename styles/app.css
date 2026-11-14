@@ -474,6 +474,14 @@
   text-align: center;
 }
 
+.library-empty {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
 .song-list {
   display: flex;
   flex-direction: column;
