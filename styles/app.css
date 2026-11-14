@@ -455,6 +455,15 @@
   border-color: rgba(255, 255, 255, 0.45);
 }
 
+.upload-song-btn {
+  width: 100%;
+}
+
+.colab-link-btn {
+  width: 100%;
+  text-decoration: none;
+}
+
 .library-status {
   font-size: 12px;
   font-weight: 600;

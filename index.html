@@ -126,26 +126,15 @@
 
       <div class="divider"></div>
 
-      <div class="loader-grid">
-        <label class="lg-btn file-btn" for="file-inst">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-          <span id="label-inst">伴奏軌</span>
-          <input id="file-inst" class="sr-only" type="file" accept="audio/*" />
-        </label>
-        <label class="lg-btn file-btn" for="file-vocal">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            <line x1="12" y1="19" x2="12" y2="22" />
-          </svg>
-          <span id="label-vocal">原人聲軌</span>
-          <input id="file-vocal" class="sr-only" type="file" accept="audio/*" />
-        </label>
-      </div>
+      <label class="lg-btn lg-glass-btn upload-song-btn" for="file-song">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <span id="label-upload-song">上傳歌曲即時分離</span>
+        <input id="file-song" class="sr-only" type="file" accept="audio/*" />
+      </label>
     </section>
   </main>
 
@@ -172,6 +161,14 @@
             <span id="label-import-zip">匯入歌包 (.zip)</span>
             <input id="file-zip" class="sr-only" type="file" accept=".zip,application/zip" />
           </label>
+          <a id="link-colab" class="lg-btn lg-glass-btn colab-link-btn" href="https://colab.research.google.com/github/bard0228/pitchlab/blob/main/pipeline/PitchLab_Colab.ipynb" target="_blank" rel="noopener noreferrer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            <span>開啟雲端 AI 精準分軌</span>
+          </a>
         </div>
 
         <div id="library-status" class="library-status" hidden style="display: none;"></div>

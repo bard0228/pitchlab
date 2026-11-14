@@ -20,6 +20,7 @@ import {
   listSongRecords,
   saveSongRecord,
 } from './song-library.js';
+import { separateAudioBufferInBrowser } from './web-separator.js';
 
 const engine = new DualDeckEngine();
 const micTracker = new MicPitchTracker();
@@ -48,10 +49,8 @@ const elMicError = document.getElementById('mic-error');
 const elHudLive = document.getElementById('hud-live');
 const elHudCents = document.getElementById('hud-cents');
 const elHudAccuracy = document.getElementById('hud-accuracy');
-const elFileInst = document.getElementById('file-inst');
-const elFileVocal = document.getElementById('file-vocal');
-const elLabelInst = document.getElementById('label-inst');
-const elLabelVocal = document.getElementById('label-vocal');
+const elFileSong = document.getElementById('file-song');
+const elLabelUploadSong = document.getElementById('label-upload-song');
 const elBtnLibrary = document.getElementById('btn-library');
 const elLibraryPortal = document.getElementById('library-portal');
 const elLibraryFrame = document.getElementById('library-frame');
@@ -66,8 +65,6 @@ let fixtureLoaded = false;
 let currentSongId = 'builtin-fixture';
 let currentMelody = FIXTURE_MELODY;
 let currentPitchCurve = melodyToPitchCurve(FIXTURE_MELODY, FIXTURE_DURATION_SEC, 10);
-let customInstFile = null;
-let customVocalFile = null;
 let isScrubbing = false;
 let octaveAgnostic = true;
 let audioMode = 'headphone';
@@ -413,40 +410,39 @@ elScrub.addEventListener('change', async () => {
   engine.seek(targetSec);
 });
 
-async function tryLoadCustomStems() {
-  if (!customInstFile || !customVocalFile) return;
-  await engine.ensureContext();
-  const [instBuf, vocBuf] = await Promise.all([
-    customInstFile.arrayBuffer().then((b) => engine.ctx.decodeAudioData(b)),
-    customVocalFile.arrayBuffer().then((b) => engine.ctx.decodeAudioData(b)),
-  ]);
-  engine.loadBuffers(instBuf, vocBuf);
-  fixtureLoaded = true;
-  currentSongId = 'custom-local';
-  currentMelody = [];
-  currentPitchCurve = null;
-  resetStatsAndTrail();
-  elScrub.max = String(engine.durationSec);
-  elScrub.value = '0';
-  elTimeCur.textContent = '00:00';
-  elTimeTot.textContent = formatTime(engine.durationSec);
-  setPlayUI(false);
-}
-
-elFileInst.addEventListener('change', (e) => {
+elFileSong.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
-  customInstFile = file;
-  elLabelInst.textContent = '伴奏已選';
-  tryLoadCustomStems();
-});
+  elLabelUploadSong.textContent = '分離人聲與音高中...';
+  try {
+    await engine.ensureContext();
+    const rawBuf = await file.arrayBuffer();
+    const srcBuffer = await engine.ctx.decodeAudioData(rawBuf);
+    const { instBuffer, vocalBuffer, pitchCurve } = separateAudioBufferInBrowser(
+      engine.ctx,
+      srcBuffer
+    );
 
-elFileVocal.addEventListener('change', (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  customVocalFile = file;
-  elLabelVocal.textContent = '人聲已選';
-  tryLoadCustomStems();
+    engine.loadBuffers(instBuffer, vocalBuffer);
+    fixtureLoaded = true;
+    currentSongId = 'instant-web';
+    currentMelody = [];
+    currentPitchCurve = pitchCurve;
+    resetStatsAndTrail();
+    elScrub.max = String(engine.durationSec);
+    elScrub.value = '0';
+    elTimeCur.textContent = '00:00';
+    elTimeTot.textContent = formatTime(engine.durationSec);
+    setPlayUI(false);
+
+    const shortTitle = file.name.replace(/\.[^.]+$/, '');
+    elLabelUploadSong.textContent = `已載入：${shortTitle}`;
+  } catch (err) {
+    elLabelUploadSong.textContent = '上傳歌曲即時分離';
+    showMicError(err?.message || '音檔解碼失敗');
+  } finally {
+    elFileSong.value = '';
+  }
 });
 
 window.__pitchLabInjectSample = (freqHz) => {
