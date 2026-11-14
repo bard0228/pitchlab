@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pitchlab-shell-v3';
+const CACHE_NAME = 'pitchlab-shell-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -45,19 +45,16 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Network-first so HTML/CSS/JS always stay in sync when online, falling back to cache offline
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
-    })
+    fetch(event.request)
+      .then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(event.request, { ignoreSearch: true }))
   );
 });

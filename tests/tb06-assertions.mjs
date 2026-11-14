@@ -61,12 +61,34 @@ export default async function ({ page, assert }) {
       ];
       return ids.map((id) => {
         const r = document.querySelector(id).getBoundingClientRect();
-        return { id, w: Math.round(r.width), h: Math.round(r.height) };
+        return { id, w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top) };
       });
     });
     for (const item of touchAudit) {
       assert(item.h >= 48, `Button ${item.id} height < 48px: ${item.h}`);
     }
+
+    const rowCheck = await page.evaluate(() => {
+      const box = (el) => {
+        const r = el.getBoundingClientRect();
+        return { width: r.width, height: r.height, top: r.top, left: r.left, right: r.right };
+      };
+      return {
+        logo: box(document.querySelector('.brand-logo')),
+        sBack: box(document.getElementById('btn-seek-back')),
+        sFwd: box(document.getElementById('btn-seek-fwd')),
+        sLoop: box(document.getElementById('btn-loop-song')),
+        abA: box(document.getElementById('btn-ab-a')),
+        abB: box(document.getElementById('btn-ab-b')),
+        abC: box(document.getElementById('btn-ab-clear')),
+        upSong: box(document.querySelector('.upload-song-btn')),
+        upLrc: box(document.querySelector('.upload-lrc-btn')),
+      };
+    });
+    assert(rowCheck.logo.width <= 42 && rowCheck.logo.height <= 42, `Logo too large: ${rowCheck.logo.width}x${rowCheck.logo.height}`);
+    assert(Math.abs(rowCheck.sBack.top - rowCheck.sFwd.top) < 4 && Math.abs(rowCheck.sBack.top - rowCheck.sLoop.top) < 4, 'Transport extras must be in 1 horizontal row');
+    assert(Math.abs(rowCheck.abA.top - rowCheck.abB.top) < 4 && Math.abs(rowCheck.abA.top - rowCheck.abC.top) < 4, 'AB buttons must be in 1 horizontal row');
+    assert(Math.abs(rowCheck.upSong.top - rowCheck.upLrc.top) < 4 && rowCheck.upSong.right <= rowCheck.upLrc.left, 'Upload buttons must be side-by-side without overlap');
 
     const songInput = await page.$('#file-song');
     await songInput.uploadFile(wavPath);
