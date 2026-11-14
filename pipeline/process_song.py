@@ -322,6 +322,101 @@ def encode_opus(in_wav: Path, out_opus: Path) -> None:
         raise RuntimeError(f"Opus 轉碼失敗：{proc.stderr.strip()}")
 
 
+def format_lrc_timestamp(sec: float) -> str:
+    safe = max(0.0, float(sec))
+    mins = int(safe // 60)
+    rem = safe - mins * 60
+    whole_sec = int(rem)
+    centi = int(round((rem - whole_sec) * 100))
+    if centi >= 100:
+        whole_sec += 1
+        centi -= 100
+    if whole_sec >= 60:
+        mins += 1
+        whole_sec -= 60
+    return f"[{mins:02d}:{whole_sec:02d}.{centi:02d}]"
+
+
+def segments_to_lrc(segments: list[dict]) -> str:
+    lines: list[str] = []
+    for seg in segments:
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        start = float(seg.get("start", 0.0))
+        lines.append(f"{format_lrc_timestamp(start)}{text}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def align_plain_lyrics_to_segments(
+    plain_lines: list[str],
+    segments: list[dict],
+    duration_sec: float = 0.0,
+) -> str:
+    cleaned = [line.strip() for line in plain_lines if line and line.strip()]
+    if not cleaned:
+        return ""
+
+    valid_segs = [
+        (float(s["start"]), max(float(s["start"]) + 0.3, float(s.get("end", s["start"] + 1.0))))
+        for s in segments
+        if str(s.get("text", "")).strip()
+    ]
+    if not valid_segs:
+        span = max(float(duration_sec), len(cleaned) * 2.5)
+        start_t = min(1.0, span * 0.05)
+        step = max(0.5, (span - start_t) / max(1, len(cleaned)))
+        return "\n".join(
+            f"{format_lrc_timestamp(start_t + i * step)}{line}"
+            for i, line in enumerate(cleaned)
+        ) + "\n"
+
+    total_chars = sum(max(1, len(line)) for line in cleaned)
+    seg_total_dur = sum(end - start for start, end in valid_segs)
+
+    def time_at_fraction(frac: float) -> float:
+        target_dur = max(0.0, min(1.0, frac)) * seg_total_dur
+        acc = 0.0
+        for start, end in valid_segs:
+            d = end - start
+            if acc + d >= target_dur or d <= 0:
+                ratio = (target_dur - acc) / d if d > 0 else 0.0
+                return start + ratio * d
+            acc += d
+        return valid_segs[-1][1]
+
+    out_lines: list[str] = []
+    char_acc = 0
+    for line in cleaned:
+        t = time_at_fraction(char_acc / total_chars)
+        out_lines.append(f"{format_lrc_timestamp(t)}{line}")
+        char_acc += max(1, len(line))
+    return "\n".join(out_lines) + "\n"
+
+
+def transcribe_vocal_whisper(voc_wav: Path, model_size: str = "small") -> list[dict]:
+    try:
+        import whisper  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("找不到 openai-whisper，請先執行 pip install openai-whisper。") from exc
+
+    model = whisper.load_model(model_size)
+    result = model.transcribe(
+        str(voc_wav),
+        initial_prompt="以下是繁體中文歌曲的歌詞：",
+        fp16=False if not os.environ.get("CUDA_VISIBLE_DEVICES") and model.device.type == "cpu" else True,
+    )
+    return [
+        {
+            "start": float(seg.get("start", 0.0)),
+            "end": float(seg.get("end", 0.0)),
+            "text": str(seg.get("text", "")).strip(),
+        }
+        for seg in result.get("segments", [])
+        if str(seg.get("text", "")).strip()
+    ]
+
+
 def process_audio_to_package(
     source_path: Path | None = None,
     youtube_url: str | None = None,
@@ -329,6 +424,10 @@ def process_audio_to_package(
     title: str | None = None,
     artist: str = "",
     separator: str = "auto",
+    lrc_path: Path | None = None,
+    lyrics_mode: str = "none",
+    lyrics_text_path: Path | None = None,
+    whisper_model: str = "small",
 ) -> dict:
     if not source_path and not youtube_url:
         raise ValueError("必須提供本機音檔路徑或 YouTube 網址。")
@@ -378,6 +477,25 @@ def process_audio_to_package(
         if diff_ms >= 20.0:
             raise RuntimeError(f"雙軌時長偏差過大：{diff_ms:.2f}ms (>= 20ms)")
 
+        lrc_content = ""
+        if lrc_path is not None:
+            lrc_file = Path(lrc_path)
+            if not lrc_file.exists():
+                raise FileNotFoundError(f"找不到歌詞檔：{lrc_file}")
+            lrc_content = lrc_file.read_text(encoding="utf-8")
+        elif lyrics_mode == "whisper":
+            segs = transcribe_vocal_whisper(voc_wav, model_size=whisper_model)
+            lrc_content = segments_to_lrc(segs)
+        elif lyrics_mode == "align" and lyrics_text_path is not None:
+            txt_file = Path(lyrics_text_path)
+            if not txt_file.exists():
+                raise FileNotFoundError(f"找不到純文字歌詞檔：{txt_file}")
+            plain_lines = txt_file.read_text(encoding="utf-8").splitlines()
+            segs = transcribe_vocal_whisper(voc_wav, model_size=whisper_model)
+            lrc_content = align_plain_lyrics_to_segments(
+                plain_lines, segs, duration_sec=max(inst_dur_ms, voc_dur_ms) / 1000.0
+            )
+
         meta = {
             "id": str(uuid.uuid4()),
             "title": song_title,
@@ -388,6 +506,7 @@ def process_audio_to_package(
             "sourceType": source_type,
             "separatorModel": used_sep,
             "pitchModel": "yin-fft-v1",
+            "hasLyrics": bool(lrc_content.strip()),
             "createdAt": datetime.now(TAIPEI_TZ).isoformat(),
         }
 
@@ -400,6 +519,8 @@ def process_audio_to_package(
         with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
             zf.writestr("pitch.json", json.dumps(pitch_curve))
+            if lrc_content.strip():
+                zf.writestr("lyrics.lrc", lrc_content)
             zf.write(inst_opus, "inst.opus")
             zf.write(voc_opus, "vocal.opus")
 
@@ -420,6 +541,15 @@ def main() -> int:
         default="auto",
         help="分軌引擎（預設 auto：優先 demucs，否則 spectral）",
     )
+    parser.add_argument("--lrc", type=Path, default=None, help="選用外部 .lrc 動態歌詞檔")
+    parser.add_argument(
+        "--lyrics-mode",
+        choices=["none", "whisper", "align"],
+        default="none",
+        help="歌詞自動處理模式（whisper 自動辨識 / align 對齊純文字歌詞）",
+    )
+    parser.add_argument("--lyrics-text", type=Path, default=None, help="純文字歌詞檔（搭配 --lyrics-mode align）")
+    parser.add_argument("--whisper-model", type=str, default="small", help="Whisper 模型大小（預設 small）")
     args = parser.parse_args()
 
     try:
@@ -430,6 +560,10 @@ def main() -> int:
             title=args.title,
             artist=args.artist,
             separator=args.separator,
+            lrc_path=args.lrc,
+            lyrics_mode=args.lyrics_mode,
+            lyrics_text_path=args.lyrics_text,
+            whisper_model=args.whisper_model,
         )
         print(json.dumps(meta, ensure_ascii=False, indent=2))
         return 0

@@ -19,6 +19,7 @@ import {
   listSongRecords,
   saveSongRecord,
 } from './song-library.js';
+import { findActiveLyricIndex, parseLrc } from './lyrics.js';
 import { separateAudioBufferInBrowser } from './web-separator.js';
 
 const engine = new DualDeckEngine();
@@ -30,6 +31,12 @@ const iconPause = document.getElementById('icon-pause');
 const elScrub = document.getElementById('scrub-bar');
 const elTimeCur = document.getElementById('time-current');
 const elTimeTot = document.getElementById('time-total');
+const elSeekBack = document.getElementById('btn-seek-back');
+const elSeekFwd = document.getElementById('btn-seek-fwd');
+const elLoopSong = document.getElementById('btn-loop-song');
+const elAbA = document.getElementById('btn-ab-a');
+const elAbB = document.getElementById('btn-ab-b');
+const elAbClear = document.getElementById('btn-ab-clear');
 const elVocalGain = document.getElementById('vocal-gain');
 const elVocalGainVal = document.getElementById('vocal-gain-value');
 const elKeyDown = document.getElementById('btn-key-down');
@@ -45,11 +52,16 @@ const elLabelOctave = document.getElementById('label-octave');
 const elLatency = document.getElementById('latency-offset');
 const elLatencyVal = document.getElementById('latency-value');
 const elMicError = document.getElementById('mic-error');
+const elLyricOverlay = document.getElementById('lyric-overlay');
+const elLyricCurrent = document.getElementById('lyric-current');
+const elLyricNext = document.getElementById('lyric-next');
 const elHudLive = document.getElementById('hud-live');
 const elHudCents = document.getElementById('hud-cents');
 const elHudAccuracy = document.getElementById('hud-accuracy');
 const elFileSong = document.getElementById('file-song');
 const elLabelUploadSong = document.getElementById('label-upload-song');
+const elFileLrc = document.getElementById('file-lrc');
+const elLabelUploadLrc = document.getElementById('label-upload-lrc');
 const elBtnLibrary = document.getElementById('btn-library');
 const elLibraryPortal = document.getElementById('library-portal');
 const elLibraryFrame = document.getElementById('library-frame');
@@ -63,9 +75,13 @@ const ctx2d = canvas.getContext('2d');
 let currentSongId = null;
 let currentMelody = [];
 let currentPitchCurve = null;
+let currentLyrics = [];
 let isScrubbing = false;
 let octaveAgnostic = true;
 let audioMode = 'headphone';
+let loopSong = false;
+let abStartSec = null;
+let abEndSec = null;
 let latencyOffsetMs = Number(localStorage.getItem('pitchlab_latency_ms') || 0);
 let injectedTestFreq = null;
 
@@ -139,6 +155,44 @@ function resetStatsAndTrail() {
   elHudAccuracy.textContent = '準確率 --%';
 }
 
+function updateAbUI() {
+  const hasA = abStartSec !== null;
+  const hasB = abEndSec !== null && hasA && abEndSec > abStartSec + 0.3;
+  elAbA.textContent = hasA ? `A ${formatTime(abStartSec)}` : '設 A';
+  elAbA.setAttribute('aria-pressed', hasA ? 'true' : 'false');
+  elAbA.classList.toggle('is-active', hasA);
+
+  elAbB.textContent = hasB ? `B ${formatTime(abEndSec)}` : '設 B';
+  elAbB.setAttribute('aria-pressed', hasB ? 'true' : 'false');
+  elAbB.classList.toggle('is-active', hasB);
+}
+
+function clearAbLoop() {
+  abStartSec = null;
+  abEndSec = null;
+  updateAbUI();
+}
+
+function updateLyricDisplay(nowSec) {
+  if (!currentLyrics || currentLyrics.length === 0) {
+    elLyricOverlay.hidden = true;
+    elLyricOverlay.style.display = 'none';
+    elLyricCurrent.textContent = '';
+    elLyricNext.textContent = '';
+    return;
+  }
+  elLyricOverlay.hidden = false;
+  elLyricOverlay.style.display = 'flex';
+  const idx = findActiveLyricIndex(currentLyrics, nowSec);
+  if (idx === -1) {
+    elLyricCurrent.textContent = '♪ 準備演唱';
+    elLyricNext.textContent = currentLyrics[0]?.text || '';
+  } else {
+    elLyricCurrent.textContent = currentLyrics[idx].text;
+    elLyricNext.textContent = currentLyrics[idx + 1]?.text || '';
+  }
+}
+
 async function loadSavedSong(record) {
   await engine.ensureContext();
   const [instBuf, vocBuf] = await Promise.all([
@@ -149,7 +203,11 @@ async function loadSavedSong(record) {
   currentSongId = record.id;
   currentPitchCurve = record.pitchCurve || null;
   currentMelody = quantizePitchCurveToNotes(currentPitchCurve);
+  currentLyrics = parseLrc(record.lyricsText || '');
+  elLabelUploadLrc.textContent = currentLyrics.length > 0 ? '已載入歌詞' : '匯入歌詞 (.lrc)';
+  clearAbLoop();
   resetStatsAndTrail();
+  updateLyricDisplay(0);
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';
@@ -303,11 +361,71 @@ elPlay.addEventListener('click', async () => {
   setPlayUI(ok);
 });
 
-engine.onEnded = () => {
+engine.onEnded = async () => {
+  if (abStartSec !== null && abEndSec !== null && abEndSec > abStartSec + 0.3) {
+    engine.seek(abStartSec);
+    const ok = await engine.play();
+    setPlayUI(ok);
+    return;
+  }
+  if (loopSong) {
+    engine.seek(0);
+    const ok = await engine.play();
+    setPlayUI(ok);
+    return;
+  }
   setPlayUI(false);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';
+  updateLyricDisplay(0);
 };
+
+async function seekByDelta(deltaSec) {
+  const hasSong = await restoreLastSavedSongIfAny();
+  if (!hasSong || engine.durationSec <= 0) return;
+  const target = Math.max(0, Math.min(engine.durationSec, engine.getCurrentTime() + deltaSec));
+  engine.seek(target);
+  elScrub.value = String(target);
+  elTimeCur.textContent = formatTime(target);
+  updateLyricDisplay(target);
+}
+
+elSeekBack.addEventListener('click', () => seekByDelta(-10));
+elSeekFwd.addEventListener('click', () => seekByDelta(10));
+
+elLoopSong.addEventListener('click', () => {
+  loopSong = !loopSong;
+  elLoopSong.setAttribute('aria-pressed', loopSong ? 'true' : 'false');
+  elLoopSong.classList.toggle('is-active', loopSong);
+});
+
+elAbA.addEventListener('click', async () => {
+  const hasSong = await restoreLastSavedSongIfAny();
+  if (!hasSong || engine.durationSec <= 0) return;
+  const now = engine.getCurrentTime();
+  abStartSec = now;
+  if (abEndSec !== null && abEndSec <= abStartSec + 0.3) {
+    abEndSec = null;
+  }
+  updateAbUI();
+});
+
+elAbB.addEventListener('click', async () => {
+  const hasSong = await restoreLastSavedSongIfAny();
+  if (!hasSong || engine.durationSec <= 0) return;
+  const now = engine.getCurrentTime();
+  if (abStartSec === null) {
+    abStartSec = 0;
+  }
+  if (now <= abStartSec + 0.3) {
+    abEndSec = Math.min(engine.durationSec, abStartSec + 2.0);
+  } else {
+    abEndSec = now;
+  }
+  updateAbUI();
+});
+
+elAbClear.addEventListener('click', clearAbLoop);
 
 elVocalGain.addEventListener('input', () => {
   const pct = Number(elVocalGain.value);
@@ -410,7 +528,11 @@ elFileSong.addEventListener('change', async (e) => {
     currentSongId = 'instant-web';
     currentPitchCurve = pitchCurve;
     currentMelody = quantizePitchCurveToNotes(pitchCurve);
+    currentLyrics = [];
+    elLabelUploadLrc.textContent = '匯入歌詞 (.lrc)';
+    clearAbLoop();
     resetStatsAndTrail();
+    updateLyricDisplay(0);
     elScrub.max = String(engine.durationSec);
     elScrub.value = '0';
     elTimeCur.textContent = '00:00';
@@ -420,10 +542,39 @@ elFileSong.addEventListener('change', async (e) => {
     const shortTitle = file.name.replace(/\.[^.]+$/, '');
     elLabelUploadSong.textContent = `已載入：${shortTitle}`;
   } catch (err) {
-    elLabelUploadSong.textContent = '上傳歌曲即時分離';
+    elLabelUploadSong.textContent = '上傳歌曲分離';
     showMicError(err?.message || '音檔解碼失敗');
   } finally {
     elFileSong.value = '';
+  }
+});
+
+elFileLrc.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const lrcText = await file.text();
+    const parsed = parseLrc(lrcText);
+    if (parsed.length === 0) {
+      showMicError('歌詞檔格式不符或無有效時間軸');
+      return;
+    }
+    showMicError('');
+    currentLyrics = parsed;
+    elLabelUploadLrc.textContent = `歌詞：${file.name.replace(/\.[^.]+$/, '')}`;
+    updateLyricDisplay(engine.getCurrentTime());
+
+    if (currentSongId && currentSongId !== 'instant-web') {
+      const rec = await getSongRecord(currentSongId);
+      if (rec) {
+        rec.lyricsText = lrcText;
+        await saveSongRecord(rec);
+      }
+    }
+  } catch (err) {
+    showMicError(err?.message || '讀取歌詞失敗');
+  } finally {
+    elFileLrc.value = '';
   }
 });
 
@@ -489,11 +640,22 @@ function drawStage() {
       }
     }
 
-    const nowSec = engine.getCurrentTime();
+    let nowSec = engine.getCurrentTime();
+    if (
+      engine.isPlaying &&
+      abStartSec !== null &&
+      abEndSec !== null &&
+      abEndSec > abStartSec + 0.3 &&
+      nowSec >= abEndSec
+    ) {
+      engine.seek(abStartSec);
+      nowSec = abStartSec;
+    }
     if (!isScrubbing && engine.durationSec > 0) {
       elScrub.value = String(nowSec);
       elTimeCur.textContent = formatTime(nowSec);
     }
+    updateLyricDisplay(nowSec);
 
     if (engine.isPlaying && engine.getFrequencyData(freqBins)) {
       const barCount = 32;

@@ -27,6 +27,7 @@ export async function decodeSongPackageZip(arrayBuffer) {
   const decoder = new TextDecoder('utf-8');
   const meta = JSON.parse(decoder.decode(entries['meta.json']));
   const pitchCurve = JSON.parse(decoder.decode(entries['pitch.json']));
+  const lyricsText = entries['lyrics.lrc'] ? decoder.decode(entries['lyrics.lrc']) : '';
 
   return {
     id: meta.id || crypto.randomUUID(),
@@ -36,6 +37,7 @@ export async function decodeSongPackageZip(arrayBuffer) {
     createdAt: meta.createdAt || new Date().toISOString(),
     meta,
     pitchCurve,
+    lyricsText,
     instBytes: entries['inst.opus'].buffer,
     vocalBytes: entries['vocal.opus'].buffer,
   };

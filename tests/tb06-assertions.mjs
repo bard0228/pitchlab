@@ -1,0 +1,143 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+function createTestWav(filePath, durationSec = 25.0, freqHz = 261.6256) {
+  const sr = 48000;
+  const n = Math.floor(sr * durationSec);
+  const dataBytes = n * 4;
+  const buf = Buffer.alloc(44 + dataBytes);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataBytes, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(sr, 24);
+  buf.writeUInt32LE(sr * 4, 28);
+  buf.writeUInt16LE(4, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataBytes, 40);
+
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const sample = Math.round(0.35 * Math.sin(2 * Math.PI * freqHz * t) * 32767);
+    buf.writeInt16LE(sample, 44 + i * 4);
+    buf.writeInt16LE(sample, 44 + i * 4 + 2);
+  }
+  fs.writeFileSync(filePath, buf);
+}
+
+export default async function ({ page, assert }) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pitchlab-tb06-'));
+  const wavPath = path.join(tmpDir, 'tb06_song.wav');
+  const lrcPath = path.join(tmpDir, 'tb06_lyrics.lrc');
+  createTestWav(wavPath, 25.0, 261.6256);
+  fs.writeFileSync(
+    lrcPath,
+    ['[00:02.00]第一句歌詞測試', '[00:10.00]第二句副歌開始', '[00:18.00]第三句結尾測試'].join('\n'),
+    'utf-8'
+  );
+
+  try {
+    await page.waitForSelector('#btn-seek-back');
+    await page.waitForSelector('#btn-seek-fwd');
+    await page.waitForSelector('#btn-loop-song');
+    await page.waitForSelector('#btn-ab-a');
+    await page.waitForSelector('#btn-ab-b');
+    await page.waitForSelector('#btn-ab-clear');
+    await page.waitForSelector('#file-lrc');
+
+    const touchAudit = await page.evaluate(() => {
+      const ids = [
+        '#btn-seek-back',
+        '#btn-seek-fwd',
+        '#btn-loop-song',
+        '#btn-ab-a',
+        '#btn-ab-b',
+        '#btn-ab-clear',
+      ];
+      return ids.map((id) => {
+        const r = document.querySelector(id).getBoundingClientRect();
+        return { id, w: Math.round(r.width), h: Math.round(r.height) };
+      });
+    });
+    for (const item of touchAudit) {
+      assert(item.h >= 48, `Button ${item.id} height < 48px: ${item.h}`);
+    }
+
+    const songInput = await page.$('#file-song');
+    await songInput.uploadFile(wavPath);
+    await new Promise((r) => setTimeout(r, 600));
+
+    // Test +10s and -10s seek
+    await page.click('#btn-seek-fwd');
+    await new Promise((r) => setTimeout(r, 80));
+    const afterFwd = await page.$eval('#time-current', (el) => el.textContent.trim());
+    assert(afterFwd === '00:10', `Expected time-current 00:10 after +10s, got "${afterFwd}"`);
+
+    await page.click('#btn-seek-fwd');
+    await new Promise((r) => setTimeout(r, 80));
+    const afterFwd2 = await page.$eval('#time-current', (el) => el.textContent.trim());
+    assert(afterFwd2 === '00:20', `Expected time-current 00:20 after second +10s, got "${afterFwd2}"`);
+
+    await page.click('#btn-seek-back');
+    await new Promise((r) => setTimeout(r, 80));
+    const afterBack = await page.$eval('#time-current', (el) => el.textContent.trim());
+    assert(afterBack === '00:10', `Expected time-current 00:10 after -10s, got "${afterBack}"`);
+
+    // Test full song loop toggle
+    await page.click('#btn-loop-song');
+    const loopPressed = await page.$eval('#btn-loop-song', (el) => el.getAttribute('aria-pressed'));
+    assert(loopPressed === 'true', `Expected #btn-loop-song aria-pressed="true", got "${loopPressed}"`);
+
+    // Test AB loop set A -> set B -> clear AB
+    await page.$eval('#scrub-bar', (el) => {
+      el.value = '4';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.click('#btn-ab-a');
+    const aText = await page.$eval('#btn-ab-a', (el) => el.textContent.trim());
+    assert(aText.includes('00:04'), `Expected #btn-ab-a to show 00:04, got "${aText}"`);
+
+    await page.$eval('#scrub-bar', (el) => {
+      el.value = '12';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.click('#btn-ab-b');
+    const bPressed = await page.$eval('#btn-ab-b', (el) => el.getAttribute('aria-pressed'));
+    assert(bPressed === 'true', `Expected #btn-ab-b aria-pressed="true", got "${bPressed}"`);
+
+    await page.click('#btn-ab-clear');
+    const bCleared = await page.$eval('#btn-ab-b', (el) => el.getAttribute('aria-pressed'));
+    assert(bCleared === 'false', `Expected #btn-ab-b aria-pressed="false" after clear, got "${bCleared}"`);
+
+    // Test LRC import and synced display
+    const lrcInput = await page.$('#file-lrc');
+    await lrcInput.uploadFile(lrcPath);
+    await new Promise((r) => setTimeout(r, 120));
+
+    await page.$eval('#scrub-bar', (el) => {
+      el.value = '11';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const lyricState = await page.evaluate(() => ({
+      cur: document.getElementById('lyric-current').textContent.trim(),
+      next: document.getElementById('lyric-next').textContent.trim(),
+    }));
+    assert(
+      lyricState.cur === '第二句副歌開始',
+      `Expected #lyric-current to be "第二句副歌開始", got "${lyricState.cur}"`
+    );
+    assert(
+      lyricState.next === '第三句結尾測試',
+      `Expected #lyric-next to be "第三句結尾測試", got "${lyricState.next}"`
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}

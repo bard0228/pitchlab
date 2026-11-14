@@ -11,9 +11,11 @@ import numpy as np
 
 from pipeline.process_song import (
     YouTubeBlockedError,
+    align_plain_lyrics_to_segments,
     check_youtube_stderr,
     extract_pitch_curve,
     process_audio_to_package,
+    segments_to_lrc,
 )
 
 
@@ -118,6 +120,43 @@ class TestPipelineSeam(unittest.TestCase):
                 self.assertGreater(len(e4_slice), 50)
                 e4_err = abs(1200 * math.log2(float(np.median(e4_slice)) / 329.6276))
                 self.assertLess(e4_err, 15.0)
+
+    def test_segments_to_lrc_and_plain_text_alignment(self):
+        segs = [
+            {"start": 1.25, "end": 4.0, "text": "辨識句一"},
+            {"start": 4.5, "end": 8.0, "text": "辨識句二"},
+        ]
+        lrc = segments_to_lrc(segs)
+        self.assertIn("[00:01.25]辨識句一", lrc)
+        self.assertIn("[00:04.50]辨識句二", lrc)
+
+        plain = ["正確歌詞第一行", "正確歌詞第二行", "正確歌詞第三行", "正確歌詞第四行"]
+        aligned = align_plain_lyrics_to_segments(plain, segs, duration_sec=10.0)
+        lines = [line for line in aligned.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 4)
+        self.assertIn("正確歌詞第一行", lines[0])
+        self.assertIn("正確歌詞第四行", lines[3])
+
+    def test_process_audio_to_package_embeds_lrc_when_provided(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            src_wav = tmp_dir / "synthetic.wav"
+            lrc_file = tmp_dir / "lyrics.lrc"
+            out_zip = tmp_dir / "with_lrc.zip"
+            write_synthetic_song_wav(src_wav, sample_rate=48000, duration_sec=6.0)
+            lrc_file.write_text("[00:01.00]測試歌詞\n", encoding="utf-8")
+
+            meta = process_audio_to_package(
+                source_path=src_wav,
+                out_zip=out_zip,
+                title="歌詞測試",
+                separator="spectral",
+                lrc_path=lrc_file,
+            )
+            self.assertTrue(meta["hasLyrics"])
+            with zipfile.ZipFile(out_zip, "r") as zf:
+                self.assertIn("lyrics.lrc", zf.namelist())
+                self.assertIn("測試歌詞", zf.read("lyrics.lrc").decode("utf-8"))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#f0f3f8" />
   <title>台灣好聲音</title>
   <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/png" href="./assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
   <link rel="stylesheet" href="./styles/liquid-glass-kit.css" />
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
@@ -16,11 +18,7 @@
     <header class="lg-glass topbar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 18V5l12-2v13" />
-            <circle cx="6" cy="18" r="3" />
-            <circle cx="18" cy="16" r="3" />
-          </svg>
+          <img src="./assets/logo.png" alt="台灣好聲音" class="brand-logo" />
         </div>
         <span class="brand-title">台灣好聲音</span>
       </div>
@@ -38,6 +36,10 @@
           <span id="hud-live" class="hud-pill tabular-nums">目前 --</span>
           <span id="hud-cents" class="hud-pill tabular-nums">偏差 --</span>
           <span id="hud-accuracy" class="hud-pill tabular-nums">準確率 --%</span>
+        </div>
+        <div id="lyric-overlay" class="lyric-overlay" hidden style="display: none;">
+          <div id="lyric-current" class="lyric-current"></div>
+          <div id="lyric-next" class="lyric-next"></div>
         </div>
         <div id="mic-error" class="mic-error" hidden style="display: none;"></div>
         <canvas id="pitch-canvas" width="380" height="256"></canvas>
@@ -63,6 +65,21 @@
           </div>
           <input id="scrub-bar" class="range-input" type="range" min="0" max="0" step="0.05" value="0" aria-label="播放進度" />
         </div>
+      </div>
+
+      <div class="transport-extras">
+        <button id="btn-seek-back" class="lg-btn lg-glass-btn mini-ctrl-btn tabular-nums" type="button">-10秒</button>
+        <button id="btn-seek-fwd" class="lg-btn lg-glass-btn mini-ctrl-btn tabular-nums" type="button">+10秒</button>
+        <button id="btn-loop-song" class="lg-btn lg-glass-btn toggle-btn mini-ctrl-btn" type="button" aria-pressed="false">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>整首循環</span>
+        </button>
+      </div>
+
+      <div class="ab-row">
+        <button id="btn-ab-a" class="lg-btn lg-glass-btn toggle-btn mini-ctrl-btn tabular-nums" type="button" aria-pressed="false">設 A</button>
+        <button id="btn-ab-b" class="lg-btn lg-glass-btn toggle-btn mini-ctrl-btn tabular-nums" type="button" aria-pressed="false">設 B</button>
+        <button id="btn-ab-clear" class="lg-btn lg-glass-btn mini-ctrl-btn" type="button">清除 AB</button>
       </div>
 
       <div class="divider"></div>
@@ -126,15 +143,28 @@
 
       <div class="divider"></div>
 
-      <label class="lg-btn lg-glass-btn upload-song-btn" for="file-song">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        <span id="label-upload-song">上傳歌曲即時分離</span>
-        <input id="file-song" class="sr-only" type="file" />
-      </label>
+      <div class="upload-grid">
+        <label class="lg-btn lg-glass-btn upload-song-btn" for="file-song">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span id="label-upload-song">上傳歌曲分離</span>
+          <input id="file-song" class="sr-only" type="file" />
+        </label>
+
+        <label class="lg-btn lg-glass-btn upload-lrc-btn" for="file-lrc">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+          <span id="label-upload-lrc">匯入歌詞 (.lrc)</span>
+          <input id="file-lrc" class="sr-only" type="file" />
+        </label>
+      </div>
     </section>
   </main>
 

@@ -1,14 +1,19 @@
-const CACHE_NAME = 'pitchlab-shell-v2';
+const CACHE_NAME = 'pitchlab-shell-v3';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
+  './assets/logo.png',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
+  './assets/icon-maskable-512.png',
   './styles/liquid-glass-kit.css',
   './styles/app.css',
   './src/app.js',
   './src/audio-math.js',
   './src/dual-deck.js',
   './src/fixture-gen.js',
+  './src/lyrics.js',
   './src/pitch-worklet.js',
   './src/pitch-judge.js',
   './src/mic-pitch.js',
