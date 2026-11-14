@@ -8,8 +8,8 @@
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/png" href="./assets/icon-192.png" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=4" />
-  <link rel="stylesheet" href="./styles/app.css?v=4" />
+  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=5" />
+  <link rel="stylesheet" href="./styles/app.css?v=5" />
 </head>
 <body>
   <div class="lg-ambient-bg" aria-hidden="true"></div>
@@ -18,7 +18,7 @@
     <header class="lg-glass topbar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
-          <img src="./assets/logo.png" alt="台灣好聲音" width="34" height="34" class="brand-logo" />
+          <img src="./assets/logo.png" alt="台灣好聲音" width="52" height="52" class="brand-logo" />
         </div>
         <span class="brand-title">台灣好聲音</span>
       </div>
@@ -37,13 +37,15 @@
           <span id="hud-cents" class="hud-pill tabular-nums">偏差 --</span>
           <span id="hud-accuracy" class="hud-pill tabular-nums">準確率 --%</span>
         </div>
-        <div id="lyric-overlay" class="lyric-overlay" hidden style="display: none;">
-          <div id="lyric-current" class="lyric-current"></div>
-          <div id="lyric-next" class="lyric-next"></div>
-        </div>
         <div id="mic-error" class="mic-error" hidden style="display: none;"></div>
         <canvas id="pitch-canvas" width="380" height="256"></canvas>
       </div>
+    </section>
+
+    <section id="lyric-overlay" class="lg-glass lyric-card" hidden style="display: none;" aria-label="同步歌詞">
+      <div id="lyric-prev" class="lyric-prev"></div>
+      <div id="lyric-current" class="lyric-current"></div>
+      <div id="lyric-next" class="lyric-next"></div>
     </section>
 
     <section class="lg-glass control-card" aria-label="播放與調音控制">

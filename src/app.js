@@ -53,6 +53,7 @@ const elLatency = document.getElementById('latency-offset');
 const elLatencyVal = document.getElementById('latency-value');
 const elMicError = document.getElementById('mic-error');
 const elLyricOverlay = document.getElementById('lyric-overlay');
+const elLyricPrev = document.getElementById('lyric-prev');
 const elLyricCurrent = document.getElementById('lyric-current');
 const elLyricNext = document.getElementById('lyric-next');
 const elHudLive = document.getElementById('hud-live');
@@ -177,6 +178,7 @@ function updateLyricDisplay(nowSec) {
   if (!currentLyrics || currentLyrics.length === 0) {
     elLyricOverlay.hidden = true;
     elLyricOverlay.style.display = 'none';
+    elLyricPrev.textContent = '';
     elLyricCurrent.textContent = '';
     elLyricNext.textContent = '';
     return;
@@ -185,9 +187,11 @@ function updateLyricDisplay(nowSec) {
   elLyricOverlay.style.display = 'flex';
   const idx = findActiveLyricIndex(currentLyrics, nowSec);
   if (idx === -1) {
+    elLyricPrev.textContent = '';
     elLyricCurrent.textContent = '♪ 準備演唱';
     elLyricNext.textContent = currentLyrics[0]?.text || '';
   } else {
+    elLyricPrev.textContent = currentLyrics[idx - 1]?.text || '';
     elLyricCurrent.textContent = currentLyrics[idx].text;
     elLyricNext.textContent = currentLyrics[idx + 1]?.text || '';
   }
@@ -216,7 +220,29 @@ async function loadSavedSong(record) {
   localStorage.setItem('pitchlab_last_song_id', record.id);
 }
 
+let builtinSeedPromise = null;
+async function ensureBuiltinSongSeeded() {
+  if (localStorage.getItem('pitchlab_builtin_seeded_v1') === '1') return;
+  if (builtinSeedPromise) return builtinSeedPromise;
+  builtinSeedPromise = (async () => {
+    try {
+      const res = await fetch('./assets/builtin_geqian.zip');
+      if (!res.ok) return;
+      const ab = await res.arrayBuffer();
+      const record = await decodeSongPackageZip(ab);
+      await saveSongRecord(record);
+      localStorage.setItem('pitchlab_builtin_seeded_v1', '1');
+      if (!engine.instBuffer && currentSongId === null) {
+        await loadSavedSong(record);
+      }
+    } catch {}
+  })();
+  return builtinSeedPromise;
+}
+
 async function restoreLastSavedSongIfAny() {
+  if (engine.instBuffer) return true;
+  await ensureBuiltinSongSeeded();
   if (engine.instBuffer) return true;
   const lastId = localStorage.getItem('pitchlab_last_song_id');
   if (lastId) {
@@ -807,4 +833,5 @@ attachAndroidEdgeStretch(
   document.scrollingElement || document.documentElement,
   document.getElementById('app-shell')
 );
+restoreLastSavedSongIfAny().catch(() => {});
 requestAnimationFrame(drawStage);

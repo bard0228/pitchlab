@@ -71,9 +71,12 @@ export default async function ({ page, assert }) {
     const rowCheck = await page.evaluate(() => {
       const box = (el) => {
         const r = el.getBoundingClientRect();
-        return { width: r.width, height: r.height, top: r.top, left: r.left, right: r.right };
+        return { width: r.width, height: r.height, top: r.top, bottom: r.bottom, left: r.left, right: r.right };
       };
+      const brandTitleStyle = getComputedStyle(document.querySelector('.brand-title'));
       return {
+        brandMark: box(document.querySelector('.brand-mark')),
+        brandFontSize: parseFloat(brandTitleStyle.fontSize),
         logo: box(document.querySelector('.brand-logo')),
         sBack: box(document.getElementById('btn-seek-back')),
         sFwd: box(document.getElementById('btn-seek-fwd')),
@@ -85,7 +88,9 @@ export default async function ({ page, assert }) {
         upLrc: box(document.querySelector('.upload-lrc-btn')),
       };
     });
-    assert(rowCheck.logo.width <= 42 && rowCheck.logo.height <= 42, `Logo too large: ${rowCheck.logo.width}x${rowCheck.logo.height}`);
+    assert(rowCheck.brandMark.width >= 54 && rowCheck.brandMark.height >= 54, `Brand mark not 1.5x: ${rowCheck.brandMark.width}x${rowCheck.brandMark.height}`);
+    assert(rowCheck.brandFontSize >= 22, `Brand title font-size not 1.5x: ${rowCheck.brandFontSize}`);
+    assert(rowCheck.logo.width <= 60 && rowCheck.logo.height <= 60, `Logo too large: ${rowCheck.logo.width}x${rowCheck.logo.height}`);
     assert(Math.abs(rowCheck.sBack.top - rowCheck.sFwd.top) < 4 && Math.abs(rowCheck.sBack.top - rowCheck.sLoop.top) < 4, 'Transport extras must be in 1 horizontal row');
     assert(Math.abs(rowCheck.abA.top - rowCheck.abB.top) < 4 && Math.abs(rowCheck.abA.top - rowCheck.abC.top) < 4, 'AB buttons must be in 1 horizontal row');
     assert(Math.abs(rowCheck.upSong.top - rowCheck.upLrc.top) < 4 && rowCheck.upSong.right <= rowCheck.upLrc.left, 'Upload buttons must be side-by-side without overlap');
@@ -136,7 +141,7 @@ export default async function ({ page, assert }) {
     const bCleared = await page.$eval('#btn-ab-b', (el) => el.getAttribute('aria-pressed'));
     assert(bCleared === 'false', `Expected #btn-ab-b aria-pressed="false" after clear, got "${bCleared}"`);
 
-    // Test LRC import and synced display
+    // Test LRC import and 3-line synced display between stage and control card
     const lrcInput = await page.$('#file-lrc');
     await lrcInput.uploadFile(lrcPath);
     await new Promise((r) => setTimeout(r, 120));
@@ -147,10 +152,28 @@ export default async function ({ page, assert }) {
     });
     await new Promise((r) => setTimeout(r, 150));
 
-    const lyricState = await page.evaluate(() => ({
-      cur: document.getElementById('lyric-current').textContent.trim(),
-      next: document.getElementById('lyric-next').textContent.trim(),
-    }));
+    const lyricState = await page.evaluate(() => {
+      const stage = document.querySelector('.pitch-stage-wrap').getBoundingClientRect();
+      const card = document.getElementById('lyric-overlay').getBoundingClientRect();
+      const ctrl = document.querySelector('.control-card').getBoundingClientRect();
+      return {
+        stageBottom: stage.bottom,
+        cardTop: card.top,
+        cardBottom: card.bottom,
+        ctrlTop: ctrl.top,
+        prev: document.getElementById('lyric-prev').textContent.trim(),
+        cur: document.getElementById('lyric-current').textContent.trim(),
+        next: document.getElementById('lyric-next').textContent.trim(),
+      };
+    });
+    assert(
+      lyricState.cardTop >= lyricState.stageBottom - 1 && lyricState.cardBottom <= lyricState.ctrlTop + 1,
+      `Lyric card must be between stage and control card (stageBottom=${lyricState.stageBottom}, cardTop=${lyricState.cardTop}, cardBottom=${lyricState.cardBottom}, ctrlTop=${lyricState.ctrlTop})`
+    );
+    assert(
+      lyricState.prev === '第一句歌詞測試',
+      `Expected #lyric-prev to be "第一句歌詞測試", got "${lyricState.prev}"`
+    );
     assert(
       lyricState.cur === '第二句副歌開始',
       `Expected #lyric-current to be "第二句副歌開始", got "${lyricState.cur}"`
