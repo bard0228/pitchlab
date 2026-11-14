@@ -32,9 +32,9 @@ test('clampGain constrains gain to [0, 1]', () => {
 });
 
 test('formatSemitoneLabel formats signed semitones', () => {
-  assert.equal(formatSemitoneLabel(0), '0 st');
-  assert.equal(formatSemitoneLabel(-3), '-3 st');
-  assert.equal(formatSemitoneLabel(4), '+4 st');
+  assert.equal(formatSemitoneLabel(0), '0 半音');
+  assert.equal(formatSemitoneLabel(-3), '-3 半音');
+  assert.equal(formatSemitoneLabel(4), '+4 半音');
 });
 
 test('formatTime formats mm:ss', () => {

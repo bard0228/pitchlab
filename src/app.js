@@ -23,7 +23,6 @@ const elKeyReset = document.getElementById('btn-key-reset');
 const elKeyVal = document.getElementById('key-value');
 const elHudKey = document.getElementById('hud-key');
 const elHudNote = document.getElementById('hud-note');
-const elTrackTitle = document.getElementById('track-title');
 const elFileInst = document.getElementById('file-inst');
 const elFileVocal = document.getElementById('file-vocal');
 const elLabelInst = document.getElementById('label-inst');
@@ -50,13 +49,15 @@ function midiToNoteName(midi) {
 function setPlayUI(playing) {
   elPlay.setAttribute('aria-pressed', playing ? 'true' : 'false');
   iconPlay.hidden = playing;
+  iconPlay.style.display = playing ? 'none' : 'block';
   iconPause.hidden = !playing;
+  iconPause.style.display = playing ? 'block' : 'none';
 }
 
 function updateKeyUI(semi) {
   const label = formatSemitoneLabel(semi);
   elKeyVal.textContent = label;
-  elHudKey.textContent = `Key ${label}`;
+  elHudKey.textContent = `調性 ${label}`;
 }
 
 async function ensureFixtureLoaded() {
@@ -123,7 +124,6 @@ async function tryLoadCustomStems() {
   engine.loadBuffers(instBuf, vocBuf);
   fixtureLoaded = true;
   currentMelody = [];
-  elTrackTitle.textContent = customInstFile.name.replace(/\.[^.]+$/, '');
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';

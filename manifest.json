@@ -1,6 +1,6 @@
 {
-  "name": "PitchLab",
-  "short_name": "PitchLab",
+  "name": "台灣好聲音",
+  "short_name": "台灣好聲音",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f0f3f8",

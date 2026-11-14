@@ -15,8 +15,8 @@ export function clampGain(gain) {
 
 export function formatSemitoneLabel(semitones) {
   const s = clampSemitones(semitones);
-  if (s > 0) return `+${s} st`;
-  return `${s} st`;
+  if (s > 0) return `+${s} 半音`;
+  return `${s} 半音`;
 }
 
 export function formatTime(seconds) {
