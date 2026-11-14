@@ -370,7 +370,7 @@ def extract_lead_vocal_regions(
     if audible.size == 0:
         return []
     p95 = float(np.percentile(audible, 95))
-    lead_thresh = max(0.03, p95 * 0.35)
+    lead_thresh = max(0.03, p95 * 0.42)
     active = rms_vals >= lead_thresh
 
     raw_regions: list[tuple[float, float]] = []
@@ -392,7 +392,23 @@ def extract_lead_vocal_regions(
         else:
             merged.append((s, e))
 
-    return [(s, e) for s, e in merged if (e - s) >= min_region_sec]
+    kept = [(s, e) for s, e in merged if (e - s) >= min_region_sec]
+    if len(kept) <= 1:
+        return kept
+
+    filtered: list[tuple[float, float]] = []
+    for idx, (s, e) in enumerate(kept):
+        gap_prev = s - (kept[idx - 1][1] if idx > 0 else 0.0)
+        gap_next = (kept[idx + 1][0] - e) if idx + 1 < len(kept) else 999.0
+        if (e - s) < 2.5 and gap_prev >= 3.5 and gap_next >= 3.5:
+            continue
+        filtered.append((s, e))
+    return filtered or kept
+
+
+def _clean_lyric_line(line: str) -> str:
+    cleaned = re.sub(r"[\u2800\u200b-\u200f\ufeff\u2002\u3000]+", " ", str(line or ""))
+    return cleaned.strip()
 
 
 def align_plain_lyrics_to_segments(
@@ -401,28 +417,19 @@ def align_plain_lyrics_to_segments(
     duration_sec: float = 0.0,
     lead_regions: list[tuple[float, float]] | None = None,
 ) -> str:
-    cleaned = [line.strip() for line in plain_lines if line and line.strip()]
+    cleaned = [_clean_lyric_line(line) for line in plain_lines]
+    cleaned = [line for line in cleaned if line]
     if not cleaned:
         return ""
 
-    valid_segs = [
-        (float(s["start"]), max(float(s["start"]) + 0.3, float(s.get("end", s["start"] + 1.0))))
-        for s in segments
-        if str(s.get("text", "")).strip()
-    ]
-
     if lead_regions:
-        clipped_segs: list[tuple[float, float]] = []
-        for s, e in valid_segs:
-            for ls, le in lead_regions:
-                cs = max(s, ls)
-                ce = min(e, le)
-                if ce - cs > 0.25:
-                    clipped_segs.append((cs, ce))
-        if len(clipped_segs) >= max(2, len(cleaned) // 4):
-            valid_segs = clipped_segs
-        else:
-            valid_segs = list(lead_regions)
+        valid_segs = list(lead_regions)
+    else:
+        valid_segs = [
+            (float(s["start"]), max(float(s["start"]) + 0.3, float(s.get("end", s["start"] + 1.0))))
+            for s in segments
+            if str(s.get("text", "")).strip()
+        ]
 
     if not valid_segs:
         span = max(float(duration_sec), len(cleaned) * 2.5)
@@ -433,7 +440,7 @@ def align_plain_lyrics_to_segments(
             for i, line in enumerate(cleaned)
         ) + "\n"
 
-    total_chars = sum(max(1, len(line)) for line in cleaned)
+    total_chars = sum(max(1, len(line.replace(" ", ""))) for line in cleaned)
     seg_total_dur = sum(end - start for start, end in valid_segs)
 
     def time_at_fraction(frac: float) -> float:
@@ -452,7 +459,7 @@ def align_plain_lyrics_to_segments(
     for line in cleaned:
         t = time_at_fraction(char_acc / total_chars)
         out_lines.append(f"{format_lrc_timestamp(t)}{line}")
-        char_acc += max(1, len(line))
+        char_acc += max(1, len(line.replace(" ", "")))
     return "\n".join(out_lines) + "\n"
 
 
@@ -553,11 +560,10 @@ def process_audio_to_package(
             if not txt_file.exists():
                 raise FileNotFoundError(f"找不到純文字歌詞檔：{txt_file}")
             plain_lines = txt_file.read_text(encoding="utf-8").splitlines()
-            segs = transcribe_vocal_whisper(voc_wav, model_size=whisper_model)
             lead_regions = extract_lead_vocal_regions(voc_samples, sr)
             lrc_content = align_plain_lyrics_to_segments(
                 plain_lines,
-                segs,
+                [],
                 duration_sec=max(inst_dur_ms, voc_dur_ms) / 1000.0,
                 lead_regions=lead_regions,
             )

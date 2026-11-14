@@ -180,7 +180,7 @@ class TestPipelineSeam(unittest.TestCase):
             {"start": 9.5, "end": 11.5, "text": "尾奏和聲"},
         ]
         aligned = align_plain_lyrics_to_segments(
-            ["第一句主唱", "第二句主唱"],
+            ["第一句主唱", "\u2800", "第二句主唱"],
             noisy_whisper_segs,
             duration_sec=12.0,
             lead_regions=regions,
