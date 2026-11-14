@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f0f3f8" />
+  <title>PitchLab</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./styles/liquid-glass-kit.css" />
+  <link rel="stylesheet" href="./styles/app.css" />
+</head>
+<body>
+  <div class="lg-ambient-bg" aria-hidden="true"></div>
+
+  <main id="app-shell" class="app-shell">
+    <header class="lg-glass topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        </div>
+        <span class="brand-title">PitchLab</span>
+      </div>
+      <span id="track-title" class="track-badge">Do Re Mi 練習曲</span>
+    </header>
+
+    <section class="lg-ice-frame pitch-stage-wrap" aria-label="音準舞台">
+      <div class="pitch-stage">
+        <div class="pitch-hud">
+          <span id="hud-note" class="hud-pill tabular-nums">--</span>
+          <span id="hud-key" class="hud-pill tabular-nums">Key 0 st</span>
+        </div>
+        <canvas id="pitch-canvas" width="380" height="256"></canvas>
+      </div>
+    </section>
+
+    <section class="lg-glass control-card" aria-label="播放與調音控制">
+      <div class="transport-row">
+        <button id="btn-play" class="lg-btn play-btn" type="button" aria-label="播放或暫停" aria-pressed="false">
+          <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="6 3 20 12 6 21 6 3" />
+          </svg>
+          <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden>
+            <rect x="6" y="4" width="4" height="16" />
+            <rect x="14" y="4" width="4" height="16" />
+          </svg>
+        </button>
+
+        <div class="scrub-col">
+          <div class="time-row tabular-nums">
+            <span id="time-current">00:00</span>
+            <span id="time-total">00:15</span>
+          </div>
+          <input id="scrub-bar" class="range-input" type="range" min="0" max="15" step="0.05" value="0" aria-label="播放進度" />
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="slider-block">
+        <div class="block-head">
+          <label class="block-label" for="vocal-gain">Guide Vocal Gain</label>
+          <span id="vocal-gain-value" class="block-val tabular-nums">100%</span>
+        </div>
+        <input id="vocal-gain" class="range-input" type="range" min="0" max="100" step="1" value="100" />
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="slider-block">
+        <div class="block-head">
+          <span class="block-label">Pitch Transpose</span>
+          <span class="block-label" style="font-size: 12px; color: var(--ink-3);">Semitone</span>
+        </div>
+        <div class="stepper-row">
+          <button id="btn-key-down" class="lg-btn step-btn tabular-nums" type="button" aria-label="降半音">-1</button>
+          <div id="key-value" class="key-readout tabular-nums">0 st</div>
+          <button id="btn-key-up" class="lg-btn step-btn tabular-nums" type="button" aria-label="升半音">+1</button>
+          <button id="btn-key-reset" class="lg-btn reset-btn" type="button">歸零</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="loader-grid">
+        <label class="lg-btn file-btn" for="file-inst">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span id="label-inst">伴奏軌</span>
+          <input id="file-inst" class="sr-only" type="file" accept="audio/*" />
+        </label>
+        <label class="lg-btn file-btn" for="file-vocal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+          </svg>
+          <span id="label-vocal">原人聲軌</span>
+          <input id="file-vocal" class="sr-only" type="file" accept="audio/*" />
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
