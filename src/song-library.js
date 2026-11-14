@@ -18,7 +18,7 @@ function openDb() {
   });
 }
 
-export async function decodeSongPackageZip(arrayBuffer) {
+export async function decodeSongPackageZip(arrayBuffer, extraMeta = {}) {
   const entries = await parseZipEntries(arrayBuffer);
   if (!entries['meta.json'] || !entries['pitch.json'] || !entries['inst.opus'] || !entries['vocal.opus']) {
     throw new Error('歌包缺少必要檔案（meta.json / pitch.json / inst.opus / vocal.opus）');
@@ -38,6 +38,8 @@ export async function decodeSongPackageZip(arrayBuffer) {
     meta,
     pitchCurve,
     lyricsText,
+    driveFileId: extraMeta.driveFileId || null,
+    sourceFileName: extraMeta.sourceFileName || null,
     instBytes: entries['inst.opus'].buffer,
     vocalBytes: entries['vocal.opus'].buffer,
   };

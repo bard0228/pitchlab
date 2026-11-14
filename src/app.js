@@ -20,6 +20,7 @@ import {
   saveSongRecord,
 } from './song-library.js';
 import { findActiveLyricIndex, parseLrc } from './lyrics.js';
+import { syncCloudLibrary } from './cloud-sync.js';
 import { separateAudioBufferInBrowser } from './web-separator.js';
 
 const engine = new DualDeckEngine();
@@ -68,6 +69,8 @@ const elLibraryPortal = document.getElementById('library-portal');
 const elLibraryFrame = document.getElementById('library-frame');
 const elBtnLibraryClose = document.getElementById('btn-library-close');
 const elFileZip = document.getElementById('file-zip');
+const elSyncUrlInput = document.getElementById('sync-url-input');
+const elBtnCloudSync = document.getElementById('btn-cloud-sync');
 const elLibraryStatus = document.getElementById('library-status');
 const elSongSearch = document.getElementById('song-search');
 const elSongList = document.getElementById('song-list');
@@ -355,10 +358,66 @@ function closeLibraryModal() {
   }, 190);
 }
 
+const CLOUD_SYNC_KEY = 'pitchlab_cloud_sync_url';
+elSyncUrlInput.value = localStorage.getItem(CLOUD_SYNC_KEY) || '';
+
+let cloudSyncing = false;
+async function runCloudSync(showFeedback = false) {
+  if (cloudSyncing) return;
+  const syncUrl = (elSyncUrlInput.value || localStorage.getItem(CLOUD_SYNC_KEY) || '').trim();
+  if (!syncUrl) {
+    if (showFeedback) showLibraryStatus('請先貼上 Google Apps Script 雲端同步網址');
+    return;
+  }
+  localStorage.setItem(CLOUD_SYNC_KEY, syncUrl);
+  cloudSyncing = true;
+  if (showFeedback) {
+    elBtnCloudSync.disabled = true;
+    showLibraryStatus('正在檢查雲端硬碟新歌...');
+  }
+  try {
+    const existing = await listSongRecords();
+    const downloaded = await syncCloudLibrary({
+      syncUrl,
+      existingRecords: existing,
+      onProgress: (idx, total, name) => {
+        if (showFeedback) showLibraryStatus(`正在匯入 (${idx}/${total})：${name}`);
+      },
+    });
+    let added = 0;
+    for (const item of downloaded) {
+      const record = await decodeSongPackageZip(item.arrayBuffer, {
+        driveFileId: item.file.id,
+        sourceFileName: item.file.name,
+      });
+      await saveSongRecord(record);
+      added++;
+      if (!engine.instBuffer && currentSongId === null) {
+        await loadSavedSong(record);
+      }
+    }
+    await renderSongList();
+    if (showFeedback) {
+      showLibraryStatus(added > 0 ? `已自動匯入 ${added} 首雲端新歌` : '雲端歌庫已是最新');
+    }
+  } catch (err) {
+    if (showFeedback) showLibraryStatus(err?.message || '雲端同步失敗');
+  } finally {
+    cloudSyncing = false;
+    elBtnCloudSync.disabled = false;
+  }
+}
+
 elBtnLibrary.addEventListener('click', openLibraryModal);
 elBtnLibraryClose.addEventListener('click', closeLibraryModal);
 elSongSearch.addEventListener('input', () => {
   renderSongList().catch(() => {});
+});
+elSyncUrlInput.addEventListener('change', () => {
+  localStorage.setItem(CLOUD_SYNC_KEY, elSyncUrlInput.value.trim());
+});
+elBtnCloudSync.addEventListener('click', () => {
+  runCloudSync(true).catch(() => {});
 });
 elLibraryPortal.addEventListener('click', (e) => {
   if (e.target === elLibraryPortal) closeLibraryModal();
@@ -844,5 +903,7 @@ attachAndroidEdgeStretch(
   document.scrollingElement || document.documentElement,
   document.getElementById('app-shell')
 );
-restoreLastSavedSongIfAny().catch(() => {});
+restoreLastSavedSongIfAny()
+  .then(() => runCloudSync(false))
+  .catch(() => {});
 requestAnimationFrame(drawStage);

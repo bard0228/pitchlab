@@ -8,8 +8,8 @@
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/png" href="./assets/icon-192.png" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=6" />
-  <link rel="stylesheet" href="./styles/app.css?v=6" />
+  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=7" />
+  <link rel="stylesheet" href="./styles/app.css?v=7" />
 </head>
 <body>
   <div class="lg-ambient-bg" aria-hidden="true"></div>
@@ -201,6 +201,11 @@
             </svg>
             <span>開啟雲端 AI 精準分軌</span>
           </a>
+        </div>
+
+        <div class="cloud-sync-row">
+          <input id="sync-url-input" class="song-search-input sync-url-input" type="url" placeholder="貼上 Apps Script 雲端同步網址..." aria-label="雲端同步網址" />
+          <button id="btn-cloud-sync" class="lg-btn lg-glass-btn sync-btn" type="button">同步</button>
         </div>
 
         <div id="library-status" class="library-status" hidden style="display: none;"></div>

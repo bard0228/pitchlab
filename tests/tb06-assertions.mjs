@@ -94,9 +94,13 @@ export default async function ({ page, assert }) {
 
     const libStyle = await page.evaluate(() => ({
       hasSearch: Boolean(document.getElementById('song-search')),
+      hasSyncUrl: Boolean(document.getElementById('sync-url-input')),
+      hasSyncBtn: Boolean(document.getElementById('btn-cloud-sync')),
       listMaxH: getComputedStyle(document.getElementById('song-list')).maxHeight,
     }));
     assert(libStyle.hasSearch, 'Expected #song-search input inside library modal');
+    assert(libStyle.hasSyncUrl, 'Expected #sync-url-input inside library modal');
+    assert(libStyle.hasSyncBtn, 'Expected #btn-cloud-sync inside library modal');
     assert(libStyle.listMaxH === '292px', `Expected #song-list maxHeight 292px (5 songs), got ${libStyle.listMaxH}`);
     assert(Math.abs(rowCheck.sBack.top - rowCheck.sFwd.top) < 4 && Math.abs(rowCheck.sBack.top - rowCheck.sLoop.top) < 4, 'Transport extras must be in 1 horizontal row');
     assert(Math.abs(rowCheck.abA.top - rowCheck.abB.top) < 4 && Math.abs(rowCheck.abA.top - rowCheck.abC.top) < 4, 'AB buttons must be in 1 horizontal row');

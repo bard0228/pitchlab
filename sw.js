@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pitchlab-shell-v6';
+const CACHE_NAME = 'pitchlab-shell-v7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './styles/app.css',
   './src/app.js',
   './src/audio-math.js',
+  './src/cloud-sync.js',
   './src/dual-deck.js',
   './src/fixture-gen.js',
   './src/lyrics.js',
