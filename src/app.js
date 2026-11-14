@@ -2,12 +2,20 @@ import {
   clampSemitones,
   formatSemitoneLabel,
   formatTime,
+  freqToMidi,
 } from './audio-math.js';
 import { DualDeckEngine } from './dual-deck.js';
-import { FIXTURE_MELODY, generateDualStemFixture } from './fixture-gen.js';
+import { FIXTURE_DURATION_SEC, FIXTURE_MELODY, generateDualStemFixture } from './fixture-gen.js';
 import { attachAndroidEdgeStretch } from './android-overscroll.js';
+import {
+  computePitchDeviationCents,
+  lookupTargetPitchAtTime,
+  melodyToPitchCurve,
+} from './pitch-judge.js';
+import { MicPitchTracker } from './mic-pitch.js';
 
 const engine = new DualDeckEngine();
+const micTracker = new MicPitchTracker();
 
 const elPlay = document.getElementById('btn-play');
 const iconPlay = document.getElementById('icon-play');
@@ -21,8 +29,16 @@ const elKeyDown = document.getElementById('btn-key-down');
 const elKeyUp = document.getElementById('btn-key-up');
 const elKeyReset = document.getElementById('btn-key-reset');
 const elKeyVal = document.getElementById('key-value');
-const elHudKey = document.getElementById('hud-key');
-const elHudNote = document.getElementById('hud-note');
+const elBtnMic = document.getElementById('btn-mic');
+const elLabelMic = document.getElementById('label-mic');
+const elBtnMode = document.getElementById('btn-mode');
+const elBtnOctave = document.getElementById('btn-octave');
+const elLatency = document.getElementById('latency-offset');
+const elLatencyVal = document.getElementById('latency-value');
+const elMicError = document.getElementById('mic-error');
+const elHudLive = document.getElementById('hud-live');
+const elHudCents = document.getElementById('hud-cents');
+const elHudAccuracy = document.getElementById('hud-accuracy');
 const elFileInst = document.getElementById('file-inst');
 const elFileVocal = document.getElementById('file-vocal');
 const elLabelInst = document.getElementById('label-inst');
@@ -32,9 +48,19 @@ const ctx2d = canvas.getContext('2d');
 
 let fixtureLoaded = false;
 let currentMelody = FIXTURE_MELODY;
+let currentPitchCurve = melodyToPitchCurve(FIXTURE_MELODY, FIXTURE_DURATION_SEC, 10);
 let customInstFile = null;
 let customVocalFile = null;
 let isScrubbing = false;
+let octaveAgnostic = true;
+let audioMode = 'headphone';
+let latencyOffsetMs = Number(localStorage.getItem('pitchlab_latency_ms') || 0);
+let injectedTestFreq = null;
+
+// Live pitch trail points: { timeSec, midi, grade }
+const liveTrail = [];
+let totalJudgedFrames = 0;
+let greenJudgedFrames = 0;
 const freqBins = new Uint8Array(128);
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -55,16 +81,37 @@ function setPlayUI(playing) {
 }
 
 function updateKeyUI(semi) {
-  const label = formatSemitoneLabel(semi);
-  elKeyVal.textContent = label;
-  elHudKey.textContent = `調性 ${label}`;
+  elKeyVal.textContent = formatSemitoneLabel(semi);
 }
+
+function showMicError(msg) {
+  if (!msg) {
+    elMicError.hidden = true;
+    elMicError.style.display = 'none';
+    elMicError.textContent = '';
+    return;
+  }
+  elMicError.textContent = msg;
+  elMicError.hidden = false;
+  elMicError.style.display = 'block';
+}
+
+function updateLatencyUI(ms) {
+  latencyOffsetMs = Math.max(-300, Math.min(300, Math.round(ms)));
+  elLatency.value = String(latencyOffsetMs);
+  elLatencyVal.textContent = `${latencyOffsetMs} 毫秒`;
+  localStorage.setItem('pitchlab_latency_ms', String(latencyOffsetMs));
+}
+
+updateLatencyUI(latencyOffsetMs);
 
 async function ensureFixtureLoaded() {
   if (fixtureLoaded) return;
   await engine.ensureContext();
   const fixture = generateDualStemFixture(engine.ctx);
   engine.loadBuffers(fixture.instBuffer, fixture.vocalBuffer);
+  currentMelody = fixture.melody;
+  currentPitchCurve = melodyToPitchCurve(fixture.melody, fixture.durationSec, 10);
   elScrub.max = String(fixture.durationSec);
   elTimeTot.textContent = formatTime(fixture.durationSec);
   fixtureLoaded = true;
@@ -103,15 +150,68 @@ elKeyDown.addEventListener('click', () => changeKey(engine.semitones - 1));
 elKeyUp.addEventListener('click', () => changeKey(engine.semitones + 1));
 elKeyReset.addEventListener('click', () => changeKey(0));
 
+elLatency.addEventListener('input', () => {
+  updateLatencyUI(Number(elLatency.value));
+});
+
+elBtnOctave.addEventListener('click', () => {
+  octaveAgnostic = !octaveAgnostic;
+  elBtnOctave.setAttribute('aria-pressed', octaveAgnostic ? 'true' : 'false');
+  elBtnOctave.classList.toggle('is-active', octaveAgnostic);
+  elBtnOctave.textContent = octaveAgnostic ? '八度寬容：開' : '八度寬容：關';
+});
+
+elBtnMode.addEventListener('click', async () => {
+  audioMode = audioMode === 'headphone' ? 'speaker' : 'headphone';
+  const isSpeaker = audioMode === 'speaker';
+  elBtnMode.setAttribute('aria-pressed', isSpeaker ? 'true' : 'false');
+  elBtnMode.classList.toggle('is-active', isSpeaker);
+  elBtnMode.textContent = isSpeaker ? '外放模式' : '耳機模式';
+
+  if (micTracker.active) {
+    micTracker.stop();
+    try {
+      await micTracker.start(audioMode);
+      showMicError('');
+    } catch (err) {
+      elBtnMic.setAttribute('aria-pressed', 'false');
+      elLabelMic.textContent = '開啟麥克風';
+      showMicError(err.message);
+    }
+  }
+});
+
+elBtnMic.addEventListener('click', async () => {
+  if (micTracker.active) {
+    micTracker.stop();
+    elBtnMic.setAttribute('aria-pressed', 'false');
+    elLabelMic.textContent = '開啟麥克風';
+    showMicError('');
+    return;
+  }
+  try {
+    await micTracker.start(audioMode);
+    elBtnMic.setAttribute('aria-pressed', 'true');
+    elLabelMic.textContent = '停止收音';
+    showMicError('');
+  } catch (err) {
+    elBtnMic.setAttribute('aria-pressed', 'false');
+    elLabelMic.textContent = '開啟麥克風';
+    showMicError(err.message);
+  }
+});
+
 elScrub.addEventListener('pointerdown', () => {
   isScrubbing = true;
 });
 elScrub.addEventListener('input', () => {
   elTimeCur.textContent = formatTime(Number(elScrub.value));
 });
-elScrub.addEventListener('change', () => {
+elScrub.addEventListener('change', async () => {
   isScrubbing = false;
-  engine.seek(Number(elScrub.value));
+  const targetSec = Number(elScrub.value);
+  await ensureFixtureLoaded();
+  engine.seek(targetSec);
 });
 
 async function tryLoadCustomStems() {
@@ -124,6 +224,10 @@ async function tryLoadCustomStems() {
   engine.loadBuffers(instBuf, vocBuf);
   fixtureLoaded = true;
   currentMelody = [];
+  currentPitchCurve = null;
+  liveTrail.length = 0;
+  totalJudgedFrames = 0;
+  greenJudgedFrames = 0;
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';
@@ -147,6 +251,18 @@ elFileVocal.addEventListener('change', (e) => {
   tryLoadCustomStems();
 });
 
+// Testing hook for deterministic E2E pitch rendering verification
+window.__pitchLabInjectSample = (freqHz) => {
+  injectedTestFreq = freqHz;
+};
+
+function updateHudGrade(grade) {
+  elHudCents.classList.remove('grade-green', 'grade-amber', 'grade-red');
+  if (grade) {
+    elHudCents.classList.add(`grade-${grade}`);
+  }
+}
+
 function drawStage() {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || 380;
@@ -158,19 +274,27 @@ function drawStage() {
   ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx2d.clearRect(0, 0, w, h);
 
-  // Pitch grid lines (C3=48 to C5=72)
-  const minMidi = 48;
-  const maxMidi = 76;
-  const midiToY = (m) => h - 24 - ((m - minMidi) / (maxMidi - minMidi)) * (h - 60);
+  const minMidi = 45;
+  const maxMidi = 78;
+  const midiToY = (m) => h - 22 - ((m - minMidi) / (maxMidi - minMidi)) * (h - 62);
 
-  ctx2d.lineWidth = 1;
+  // Semitone grid + C3/C4/C5 labels
+  ctx2d.font = '600 10px "Plus Jakarta Sans", sans-serif';
+  ctx2d.textBaseline = 'middle';
   for (let m = minMidi; m <= maxMidi; m += 2) {
     const y = midiToY(m);
-    ctx2d.strokeStyle = m % 12 === 0 ? 'rgba(148, 163, 184, 0.22)' : 'rgba(148, 163, 184, 0.08)';
+    const isOctaveC = m % 12 === 0;
+    ctx2d.lineWidth = 1;
+    ctx2d.strokeStyle = isOctaveC ? 'rgba(148, 163, 184, 0.24)' : 'rgba(148, 163, 184, 0.08)';
     ctx2d.beginPath();
-    ctx2d.moveTo(0, y);
+    ctx2d.moveTo(28, y);
     ctx2d.lineTo(w, y);
     ctx2d.stroke();
+
+    if (isOctaveC) {
+      ctx2d.fillStyle = 'rgba(148, 163, 184, 0.65)';
+      ctx2d.fillText(midiToNoteName(m), 6, y);
+    }
   }
 
   const nowSec = engine.getCurrentTime();
@@ -179,49 +303,115 @@ function drawStage() {
     elTimeCur.textContent = formatTime(nowSec);
   }
 
-  // Spectrum bars along bottom
   if (engine.isPlaying && engine.getFrequencyData(freqBins)) {
     const barCount = 32;
-    const barW = w / barCount;
-    ctx2d.fillStyle = 'rgba(91, 130, 112, 0.28)';
+    const barW = (w - 30) / barCount;
+    ctx2d.fillStyle = 'rgba(91, 130, 112, 0.22)';
     for (let i = 0; i < barCount; i++) {
       const val = freqBins[i] / 255;
-      const bh = val * 44;
-      ctx2d.fillRect(i * barW + 2, h - bh, Math.max(2, barW - 4), bh);
+      const bh = val * 36;
+      ctx2d.fillRect(30 + i * barW + 2, h - bh, Math.max(2, barW - 4), bh);
     }
   }
 
-  // Scrolling target pitch bars shifted by current Pitch Transpose
-  const playheadX = w * 0.28;
+  const playheadX = w * 0.3;
   const pxPerSec = 72;
-  let activeNoteText = '--';
 
+  // Target Pitch Curve bars (shifted by Pitch Transpose + Latency Offset)
   for (const note of currentMelody) {
     const shiftedMidi = note.midi + engine.semitones;
-    const x1 = playheadX + (note.start - nowSec) * pxPerSec;
-    const x2 = playheadX + (note.end - nowSec) * pxPerSec;
-    if (x2 < -10 || x1 > w + 10) continue;
+    const visualOffsetSec = latencyOffsetMs / 1000;
+    const x1 = playheadX + (note.start - visualOffsetSec - nowSec) * pxPerSec;
+    const x2 = playheadX + (note.end - visualOffsetSec - nowSec) * pxPerSec;
+    if (x2 < 28 || x1 > w + 10) continue;
 
     const y = midiToY(shiftedMidi);
-    const active = nowSec >= note.start && nowSec < note.end;
-    if (active) {
-      activeNoteText = midiToNoteName(shiftedMidi);
-    }
-
-    ctx2d.fillStyle = active ? '#4ade80' : 'rgba(96, 165, 250, 0.55)';
+    const active = nowSec + visualOffsetSec >= note.start && nowSec + visualOffsetSec < note.end;
+    ctx2d.fillStyle = active ? 'rgba(96, 165, 250, 0.92)' : 'rgba(96, 165, 250, 0.42)';
     ctx2d.beginPath();
-    ctx2d.roundRect(x1, y - 6, Math.max(6, x2 - x1 - 2), 12, 6);
+    ctx2d.roundRect(Math.max(28, x1), y - 6, Math.max(6, x2 - Math.max(28, x1) - 2), 12, 6);
     ctx2d.fill();
   }
 
-  elHudNote.textContent = activeNoteText;
+  // Live microphone pitch detection & deviation calculation
+  const liveSample = injectedTestFreq
+    ? { freq: injectedTestFreq, clarity: 0.99 }
+    : micTracker.samplePitch();
+
+  if (liveSample) {
+    const liveMidi = freqToMidi(liveSample.freq);
+    elHudLive.textContent = `目前 ${midiToNoteName(liveMidi)}`;
+
+    const targetHz = lookupTargetPitchAtTime(currentPitchCurve, nowSec, latencyOffsetMs);
+    let grade = 'neutral';
+    if (targetHz) {
+      const dev = computePitchDeviationCents(
+        liveSample.freq,
+        targetHz,
+        engine.semitones,
+        octaveAgnostic
+      );
+      if (dev) {
+        grade = dev.grade;
+        const sign = dev.cents > 0 ? '+' : '';
+        elHudCents.textContent = `偏差 ${sign}${dev.cents} 音分`;
+        updateHudGrade(dev.grade);
+
+        totalJudgedFrames++;
+        if (dev.grade === 'green') greenJudgedFrames++;
+        const acc = Math.round((greenJudgedFrames / totalJudgedFrames) * 100);
+        elHudAccuracy.textContent = `準確率 ${acc}%`;
+      }
+    } else {
+      elHudCents.textContent = '偏差 --';
+      updateHudGrade(null);
+    }
+
+    const displayMidi = Math.max(minMidi, Math.min(maxMidi, liveMidi));
+    liveTrail.push({ timeSec: nowSec, midi: displayMidi, grade });
+    if (liveTrail.length > 240) liveTrail.shift();
+  } else {
+    elHudLive.textContent = '目前 --';
+    elHudCents.textContent = '偏差 --';
+    updateHudGrade(null);
+    if (liveTrail.length > 0 && liveTrail[liveTrail.length - 1] !== null) {
+      liveTrail.push(null);
+    }
+  }
+
+  // Render glowing live singing trail
+  const colorMap = {
+    green: '#4ade80',
+    amber: '#fbbf24',
+    red: '#f87171',
+    neutral: '#93c5fd',
+  };
+  ctx2d.lineWidth = 3;
+  ctx2d.lineCap = 'round';
+  ctx2d.lineJoin = 'round';
+
+  for (let i = 1; i < liveTrail.length; i++) {
+    const prev = liveTrail[i - 1];
+    const curr = liveTrail[i];
+    if (!prev || !curr) continue;
+    const x1 = playheadX + (prev.timeSec - nowSec) * pxPerSec;
+    const x2 = playheadX + (curr.timeSec - nowSec) * pxPerSec;
+    if (x2 < 28 || x1 > w) continue;
+    if (Math.abs(x2 - x1) > 25) continue;
+
+    ctx2d.strokeStyle = colorMap[curr.grade] || colorMap.neutral;
+    ctx2d.beginPath();
+    ctx2d.moveTo(x1, midiToY(prev.midi));
+    ctx2d.lineTo(x2, midiToY(curr.midi));
+    ctx2d.stroke();
+  }
 
   // Playhead line
   ctx2d.strokeStyle = 'rgba(248, 250, 252, 0.65)';
   ctx2d.lineWidth = 2;
   ctx2d.beginPath();
-  ctx2d.moveTo(playheadX, 34);
-  ctx2d.lineTo(playheadX, h - 10);
+  ctx2d.moveTo(playheadX, 38);
+  ctx2d.lineTo(playheadX, h - 8);
   ctx2d.stroke();
 
   requestAnimationFrame(drawStage);
