@@ -541,11 +541,35 @@
 
 .sync-btn {
   height: 48px;
+  min-width: 64px;
   padding: 0 14px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: linear-gradient(145deg, rgba(125, 161, 144, 0.92), rgba(107, 143, 126, 0.96));
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.45);
+}
+
+.sync-btn.is-syncing {
+  opacity: 0.92;
+  cursor: wait;
+}
+
+.sync-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: pitchlab-spin 0.75s linear infinite;
+}
+
+@keyframes pitchlab-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .song-search-input::placeholder {

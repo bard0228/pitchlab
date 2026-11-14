@@ -13,6 +13,7 @@ from pipeline.process_song import (
     YouTubeBlockedError,
     align_plain_lyrics_to_segments,
     check_youtube_stderr,
+    extract_lead_vocal_regions,
     extract_pitch_curve,
     process_audio_to_package,
     segments_to_lrc,
@@ -157,6 +158,37 @@ class TestPipelineSeam(unittest.TestCase):
             with zipfile.ZipFile(out_zip, "r") as zf:
                 self.assertIn("lyrics.lrc", zf.namelist())
                 self.assertIn("測試歌詞", zf.read("lyrics.lrc").decode("utf-8"))
+
+    def test_lead_vocal_regions_ignores_quiet_backing_harmonies(self):
+        sr = 16000
+        t = np.arange(sr * 12, dtype=np.float32) / sr
+        samples = np.zeros_like(t)
+        # 0-4s: quiet backing harmony (amp 0.03)
+        samples[: sr * 4] = 0.03 * np.sin(2 * np.pi * 220.0 * t[: sr * 4])
+        # 4-9s: strong lead vocal (amp 0.45)
+        samples[sr * 4 : sr * 9] = 0.45 * np.sin(2 * np.pi * 330.0 * t[sr * 4 : sr * 9])
+        # 9-12s: quiet backing harmony (amp 0.03)
+        samples[sr * 9 :] = 0.03 * np.sin(2 * np.pi * 220.0 * t[sr * 9 :])
+
+        regions = extract_lead_vocal_regions(samples, sr)
+        self.assertEqual(len(regions), 1)
+        self.assertGreaterEqual(regions[0][0], 3.8)
+        self.assertLessEqual(regions[0][1], 9.2)
+
+        noisy_whisper_segs = [
+            {"start": 0.5, "end": 3.5, "text": "和聲誤判"},
+            {"start": 4.2, "end": 8.8, "text": "主唱段落"},
+            {"start": 9.5, "end": 11.5, "text": "尾奏和聲"},
+        ]
+        aligned = align_plain_lyrics_to_segments(
+            ["第一句主唱", "第二句主唱"],
+            noisy_whisper_segs,
+            duration_sec=12.0,
+            lead_regions=regions,
+        )
+        lines = [line for line in aligned.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith("[00:04."), f"Expected ~4s start, got {lines[0]}")
 
 
 if __name__ == "__main__":

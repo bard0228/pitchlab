@@ -225,6 +225,7 @@ async function loadSavedSong(record) {
 }
 
 let builtinSeedPromise = null;
+let userHasLoadedOrStartedLoad = false;
 async function ensureBuiltinSongSeeded() {
   if (localStorage.getItem('pitchlab_builtin_seeded_v1') === '1') return;
   if (builtinSeedPromise) return builtinSeedPromise;
@@ -236,7 +237,7 @@ async function ensureBuiltinSongSeeded() {
       const record = await decodeSongPackageZip(ab);
       await saveSongRecord(record);
       localStorage.setItem('pitchlab_builtin_seeded_v1', '1');
-      if (!engine.instBuffer && currentSongId === null) {
+      if (!engine.instBuffer && currentSongId === null && !userHasLoadedOrStartedLoad) {
         await loadSavedSong(record);
       }
     } catch {}
@@ -245,14 +246,14 @@ async function ensureBuiltinSongSeeded() {
 }
 
 async function restoreLastSavedSongIfAny() {
-  if (engine.instBuffer) return true;
+  if (engine.instBuffer || userHasLoadedOrStartedLoad) return true;
   await ensureBuiltinSongSeeded();
-  if (engine.instBuffer) return true;
+  if (engine.instBuffer || userHasLoadedOrStartedLoad) return true;
   const lastId = localStorage.getItem('pitchlab_last_song_id');
   if (lastId) {
     try {
       const rec = await getSongRecord(lastId);
-      if (rec) {
+      if (rec && !userHasLoadedOrStartedLoad) {
         await loadSavedSong(rec);
         return true;
       }
@@ -365,13 +366,23 @@ let cloudSyncPromise = null;
 let cloudSyncStatusMsg = '';
 let lastSyncSummary = '';
 
+function setCloudSyncLoading(isLoading) {
+  elBtnCloudSync.disabled = isLoading;
+  elBtnCloudSync.classList.toggle('is-syncing', isLoading);
+  elBtnCloudSync.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+  elBtnCloudSync.setAttribute('aria-label', isLoading ? '正在同步雲端歌庫' : '同步雲端歌庫');
+  elBtnCloudSync.innerHTML = isLoading
+    ? '<span class="sync-spinner" aria-hidden="true"></span>'
+    : '同步';
+}
+
 async function runCloudSync(showFeedback = false) {
   if (cloudSyncPromise) {
     if (showFeedback) {
-      elBtnCloudSync.disabled = true;
+      setCloudSyncLoading(true);
       showLibraryStatus(cloudSyncStatusMsg || '正在檢查雲端硬碟新歌...');
       await cloudSyncPromise;
-      elBtnCloudSync.disabled = false;
+      setCloudSyncLoading(false);
       if (lastSyncSummary) showLibraryStatus(lastSyncSummary);
     }
     return cloudSyncPromise;
@@ -385,8 +396,8 @@ async function runCloudSync(showFeedback = false) {
   localStorage.setItem(CLOUD_SYNC_KEY, syncUrl);
   cloudSyncStatusMsg = '正在檢查雲端硬碟新歌...';
   lastSyncSummary = '';
-  if (showFeedback) {
-    elBtnCloudSync.disabled = true;
+  setCloudSyncLoading(true);
+  if (showFeedback || !elLibraryPortal.hidden) {
     showLibraryStatus(cloudSyncStatusMsg);
   }
 
@@ -426,7 +437,7 @@ async function runCloudSync(showFeedback = false) {
     } finally {
       cloudSyncStatusMsg = '';
       cloudSyncPromise = null;
-      elBtnCloudSync.disabled = false;
+      setCloudSyncLoading(false);
     }
   })();
 
@@ -635,6 +646,7 @@ elScrub.addEventListener('change', async () => {
 elFileSong.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  userHasLoadedOrStartedLoad = true;
   elLabelUploadSong.textContent = '分離人聲與音高中...';
   try {
     await engine.ensureContext();

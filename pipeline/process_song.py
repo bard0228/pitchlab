@@ -348,10 +348,58 @@ def segments_to_lrc(segments: list[dict]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def extract_lead_vocal_regions(
+    samples: np.ndarray,
+    sample_rate: int,
+    hop_ms: int = 100,
+    min_region_sec: float = 0.45,
+    merge_gap_sec: float = 0.55,
+) -> list[tuple[float, float]]:
+    if samples.size == 0 or sample_rate <= 0:
+        return []
+    mono = np.mean(samples, axis=1).astype(np.float32) if samples.ndim == 2 else samples.astype(np.float32)
+    hop = max(1, int(round(sample_rate * hop_ms / 1000.0)))
+    total_frames = int(np.ceil(len(mono) / hop))
+    rms_vals = np.zeros(total_frames, dtype=np.float32)
+    for i in range(total_frames):
+        chunk = mono[i * hop : (i + 1) * hop]
+        if chunk.size > 0:
+            rms_vals[i] = float(np.sqrt(np.mean(chunk * chunk)))
+
+    audible = rms_vals[rms_vals > 0.005]
+    if audible.size == 0:
+        return []
+    p95 = float(np.percentile(audible, 95))
+    lead_thresh = max(0.025, p95 * 0.22)
+    active = rms_vals >= lead_thresh
+
+    raw_regions: list[tuple[float, float]] = []
+    start_idx: int | None = None
+    frame_sec = hop / float(sample_rate)
+    for i, flag in enumerate(active):
+        if flag and start_idx is None:
+            start_idx = i
+        elif not flag and start_idx is not None:
+            raw_regions.append((start_idx * frame_sec, i * frame_sec))
+            start_idx = None
+    if start_idx is not None:
+        raw_regions.append((start_idx * frame_sec, len(mono) / float(sample_rate)))
+
+    merged: list[tuple[float, float]] = []
+    for s, e in raw_regions:
+        if merged and s - merged[-1][1] <= merge_gap_sec:
+            merged[-1] = (merged[-1][0], e)
+        else:
+            merged.append((s, e))
+
+    return [(s, e) for s, e in merged if (e - s) >= min_region_sec]
+
+
 def align_plain_lyrics_to_segments(
     plain_lines: list[str],
     segments: list[dict],
     duration_sec: float = 0.0,
+    lead_regions: list[tuple[float, float]] | None = None,
 ) -> str:
     cleaned = [line.strip() for line in plain_lines if line and line.strip()]
     if not cleaned:
@@ -362,6 +410,17 @@ def align_plain_lyrics_to_segments(
         for s in segments
         if str(s.get("text", "")).strip()
     ]
+
+    if lead_regions:
+        def overlaps_lead(s: float, e: float) -> bool:
+            return any(min(e, le) - max(s, ls) > 0.15 for ls, le in lead_regions)
+
+        filtered_segs = [(s, e) for s, e in valid_segs if overlaps_lead(s, e)]
+        if len(filtered_segs) >= max(2, len(cleaned) // 4):
+            valid_segs = filtered_segs
+        else:
+            valid_segs = list(lead_regions)
+
     if not valid_segs:
         span = max(float(duration_sec), len(cleaned) * 2.5)
         start_t = min(1.0, span * 0.05)
@@ -492,8 +551,12 @@ def process_audio_to_package(
                 raise FileNotFoundError(f"找不到純文字歌詞檔：{txt_file}")
             plain_lines = txt_file.read_text(encoding="utf-8").splitlines()
             segs = transcribe_vocal_whisper(voc_wav, model_size=whisper_model)
+            lead_regions = extract_lead_vocal_regions(voc_samples, sr)
             lrc_content = align_plain_lyrics_to_segments(
-                plain_lines, segs, duration_sec=max(inst_dur_ms, voc_dur_ms) / 1000.0
+                plain_lines,
+                segs,
+                duration_sec=max(inst_dur_ms, voc_dur_ms) / 1000.0,
+                lead_regions=lead_regions,
             )
 
         meta = {
