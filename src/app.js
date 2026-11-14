@@ -11,6 +11,7 @@ import {
   computePitchDeviationCents,
   lookupTargetPitchAtTime,
   melodyToPitchCurve,
+  quantizePitchCurveToNotes,
 } from './pitch-judge.js';
 import { MicPitchTracker } from './mic-pitch.js';
 import {
@@ -165,8 +166,8 @@ async function loadSavedSong(record) {
   ]);
   engine.loadBuffers(instBuf, vocBuf);
   currentSongId = record.id;
-  currentMelody = [];
   currentPitchCurve = record.pitchCurve || null;
+  currentMelody = quantizePitchCurveToNotes(currentPitchCurve);
   resetStatsAndTrail();
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
@@ -426,8 +427,8 @@ elFileSong.addEventListener('change', async (e) => {
     engine.loadBuffers(instBuffer, vocalBuffer);
     fixtureLoaded = true;
     currentSongId = 'instant-web';
-    currentMelody = [];
     currentPitchCurve = pitchCurve;
+    currentMelody = quantizePitchCurveToNotes(pitchCurve);
     resetStatsAndTrail();
     elScrub.max = String(engine.durationSec);
     elScrub.value = '0';

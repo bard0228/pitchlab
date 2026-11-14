@@ -146,3 +146,58 @@ export function medianOfThree(a, b, c) {
   if (a > c) return a;
   return b > c ? c : b;
 }
+
+export function quantizePitchCurveToNotes(pitchCurve, minNoteSec = 0.08) {
+  if (!pitchCurve || !Array.isArray(pitchCurve.f0Hz) || !pitchCurve.hopMs) {
+    return [];
+  }
+  const hopSec = pitchCurve.hopMs / 1000;
+  const raw = pitchCurve.f0Hz;
+  const n = raw.length;
+  const midiArr = new Array(n).fill(null);
+
+  for (let i = 0; i < n; i++) {
+    const hz = raw[i];
+    if (typeof hz === 'number' && hz > 0) {
+      midiArr[i] = Math.round(69 + 12 * Math.log2(hz / 440));
+    }
+  }
+
+  // 3-frame median filter to eliminate single-frame octave spikes
+  const smoothed = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const a = i > 0 ? midiArr[i - 1] : null;
+    const b = midiArr[i];
+    const c = i + 1 < n ? midiArr[i + 1] : null;
+    if (b === null) {
+      if (a !== null && c !== null && a === c) smoothed[i] = a;
+      continue;
+    }
+    if (a !== null && c !== null) {
+      smoothed[i] = medianOfThree(a, b, c);
+    } else {
+      smoothed[i] = b;
+    }
+  }
+
+  const notes = [];
+  let segStart = -1;
+  let segMidi = null;
+
+  for (let i = 0; i <= n; i++) {
+    const m = i < n ? smoothed[i] : null;
+    if (m === segMidi) continue;
+
+    if (segMidi !== null && segStart !== -1) {
+      const start = segStart * hopSec;
+      const end = i * hopSec;
+      if (end - start >= minNoteSec) {
+        notes.push({ start, end, midi: segMidi });
+      }
+    }
+    segStart = m !== null ? i : -1;
+    segMidi = m;
+  }
+
+  return notes;
+}

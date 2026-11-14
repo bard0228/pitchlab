@@ -5,6 +5,7 @@ import {
   lookupTargetPitchAtTime,
   detectPitchYIN,
   melodyToPitchCurve,
+  quantizePitchCurveToNotes,
 } from '../src/pitch-judge.js';
 
 test('computePitchDeviationCents handles exact pitch, sharp/flat, transpose, and octave-agnostic folding', () => {
@@ -71,4 +72,23 @@ test('melodyToPitchCurve converts note segments to 10ms hop curve', () => {
   assert.equal(curve.f0Hz[5], null);
   assert.ok(Math.abs(curve.f0Hz[15] - 261.625565) < 0.01);
   assert.equal(curve.f0Hz[25], null);
+});
+
+test('quantizePitchCurveToNotes smooths vibrato/spikes into clean note bars and drops short blips', () => {
+  // 20ms hop -> 5 frames = 100ms (>= 80ms)
+  const c4 = 261.6256;
+  const d4 = 293.6648;
+  const spikeLow = 130.81; // C3 single-frame octave spike
+  const f0Hz = [
+    null,
+    c4, c4 * 1.01, spikeLow, c4 * 0.99, c4, // 100ms C4 with vibrato + 1-frame spike
+    null,
+    d4, // 20ms blip (< 80ms -> must be dropped)
+    null,
+  ];
+  const notes = quantizePitchCurveToNotes({ hopMs: 20, f0Hz }, 0.08);
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].midi, 60);
+  assert.ok(Math.abs(notes[0].start - 0.02) < 1e-6);
+  assert.ok(Math.abs(notes[0].end - 0.12) < 1e-6);
 });
