@@ -413,6 +413,20 @@
   font-weight: 600;
 }
 
+.lyric-offset-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.lyric-step-btn,
+.lyric-reset-btn {
+  height: 38px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+
 /* Local Stem Loader Row */
 .loader-grid {
   display: grid;

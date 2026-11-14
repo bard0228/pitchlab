@@ -143,6 +143,20 @@
         <input id="latency-offset" class="range-input" type="range" min="-300" max="300" step="10" value="0" />
       </div>
 
+      <div class="slider-block">
+        <div class="block-head">
+          <span class="block-label">歌詞延遲</span>
+          <span id="lyric-offset-value" class="block-val tabular-nums">0.0 秒</span>
+        </div>
+        <div class="lyric-offset-row">
+          <button id="btn-lyric-early-1" class="lg-btn step-btn lyric-step-btn" type="button">-1秒</button>
+          <button id="btn-lyric-early-half" class="lg-btn step-btn lyric-step-btn" type="button">-0.5</button>
+          <button id="btn-lyric-offset-reset" class="lg-btn reset-btn lyric-reset-btn" type="button">歸零</button>
+          <button id="btn-lyric-late-half" class="lg-btn step-btn lyric-step-btn" type="button">+0.5</button>
+          <button id="btn-lyric-late-1" class="lg-btn step-btn lyric-step-btn" type="button">+1秒</button>
+        </div>
+      </div>
+
       <div class="divider"></div>
 
       <div class="upload-grid">

@@ -52,6 +52,12 @@ const elBtnOctave = document.getElementById('btn-octave');
 const elLabelOctave = document.getElementById('label-octave');
 const elLatency = document.getElementById('latency-offset');
 const elLatencyVal = document.getElementById('latency-value');
+const elLyricOffsetVal = document.getElementById('lyric-offset-value');
+const elBtnLyricEarly1 = document.getElementById('btn-lyric-early-1');
+const elBtnLyricEarlyHalf = document.getElementById('btn-lyric-early-half');
+const elBtnLyricOffsetReset = document.getElementById('btn-lyric-offset-reset');
+const elBtnLyricLateHalf = document.getElementById('btn-lyric-late-half');
+const elBtnLyricLate1 = document.getElementById('btn-lyric-late-1');
 const elMicError = document.getElementById('mic-error');
 const elLyricOverlay = document.getElementById('lyric-overlay');
 const elLyricPrev = document.getElementById('lyric-prev');
@@ -88,6 +94,7 @@ let loopSong = false;
 let abStartSec = null;
 let abEndSec = null;
 let latencyOffsetMs = Number(localStorage.getItem('pitchlab_latency_ms') || 0);
+let lyricOffsetSec = 0;
 let injectedTestFreq = null;
 
 const liveTrail = [];
@@ -153,6 +160,29 @@ function updateLatencyUI(ms) {
 
 updateLatencyUI(latencyOffsetMs);
 
+function formatLyricOffsetLabel(sec) {
+  const rounded = Math.round(sec * 2) / 2;
+  if (Math.abs(rounded) < 0.01) return '0.0 秒';
+  const sign = rounded > 0 ? '+' : '';
+  return `${sign}${rounded.toFixed(1)} 秒`;
+}
+
+function setLyricOffset(sec, persist = true) {
+  lyricOffsetSec = Math.max(-30, Math.min(30, Math.round(sec * 2) / 2));
+  if (elLyricOffsetVal) {
+    elLyricOffsetVal.textContent = formatLyricOffsetLabel(lyricOffsetSec);
+  }
+  if (persist && currentSongId) {
+    localStorage.setItem(`pitchlab_lyric_offset_${currentSongId}`, String(lyricOffsetSec));
+  }
+  updateLyricDisplay(engine.getCurrentTime());
+}
+
+function loadLyricOffsetForSong(songId) {
+  const saved = songId ? Number(localStorage.getItem(`pitchlab_lyric_offset_${songId}`) || 0) : 0;
+  setLyricOffset(Number.isFinite(saved) ? saved : 0, false);
+}
+
 function resetStatsAndTrail() {
   liveTrail.length = 0;
   totalJudgedFrames = 0;
@@ -189,7 +219,7 @@ function updateLyricDisplay(nowSec) {
   }
   elLyricOverlay.hidden = false;
   elLyricOverlay.style.display = 'flex';
-  const idx = findActiveLyricIndex(currentLyrics, nowSec);
+  const idx = findActiveLyricIndex(currentLyrics, nowSec - lyricOffsetSec);
   if (idx === -1) {
     elLyricPrev.textContent = '';
     elLyricCurrent.textContent = '♪ 準備演唱';
@@ -215,7 +245,7 @@ async function loadSavedSong(record) {
   elLabelUploadLrc.textContent = currentLyrics.length > 0 ? '已載入歌詞' : '匯入歌詞 (.lrc)';
   clearAbLoop();
   resetStatsAndTrail();
-  updateLyricDisplay(0);
+  loadLyricOffsetForSong(currentSongId);
   elScrub.max = String(engine.durationSec);
   elScrub.value = '0';
   elTimeCur.textContent = '00:00';
@@ -578,6 +608,12 @@ elKeyReset.addEventListener('click', () => changeKey(0));
 elLatency.addEventListener('input', () => {
   updateLatencyUI(Number(elLatency.value));
 });
+
+elBtnLyricEarly1?.addEventListener('click', () => setLyricOffset(lyricOffsetSec - 1));
+elBtnLyricEarlyHalf?.addEventListener('click', () => setLyricOffset(lyricOffsetSec - 0.5));
+elBtnLyricOffsetReset?.addEventListener('click', () => setLyricOffset(0));
+elBtnLyricLateHalf?.addEventListener('click', () => setLyricOffset(lyricOffsetSec + 0.5));
+elBtnLyricLate1?.addEventListener('click', () => setLyricOffset(lyricOffsetSec + 1));
 
 elBtnOctave.addEventListener('click', () => {
   octaveAgnostic = !octaveAgnostic;

@@ -352,7 +352,7 @@ def extract_lead_vocal_regions(
     samples: np.ndarray,
     sample_rate: int,
     hop_ms: int = 100,
-    min_region_sec: float = 0.45,
+    min_region_sec: float = 0.65,
     merge_gap_sec: float = 0.55,
 ) -> list[tuple[float, float]]:
     if samples.size == 0 or sample_rate <= 0:
@@ -370,7 +370,7 @@ def extract_lead_vocal_regions(
     if audible.size == 0:
         return []
     p95 = float(np.percentile(audible, 95))
-    lead_thresh = max(0.025, p95 * 0.22)
+    lead_thresh = max(0.03, p95 * 0.35)
     active = rms_vals >= lead_thresh
 
     raw_regions: list[tuple[float, float]] = []
@@ -412,12 +412,15 @@ def align_plain_lyrics_to_segments(
     ]
 
     if lead_regions:
-        def overlaps_lead(s: float, e: float) -> bool:
-            return any(min(e, le) - max(s, ls) > 0.15 for ls, le in lead_regions)
-
-        filtered_segs = [(s, e) for s, e in valid_segs if overlaps_lead(s, e)]
-        if len(filtered_segs) >= max(2, len(cleaned) // 4):
-            valid_segs = filtered_segs
+        clipped_segs: list[tuple[float, float]] = []
+        for s, e in valid_segs:
+            for ls, le in lead_regions:
+                cs = max(s, ls)
+                ce = min(e, le)
+                if ce - cs > 0.25:
+                    clipped_segs.append((cs, ce))
+        if len(clipped_segs) >= max(2, len(cleaned) // 4):
+            valid_segs = clipped_segs
         else:
             valid_segs = list(lead_regions)
 

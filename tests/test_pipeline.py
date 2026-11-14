@@ -163,12 +163,12 @@ class TestPipelineSeam(unittest.TestCase):
         sr = 16000
         t = np.arange(sr * 12, dtype=np.float32) / sr
         samples = np.zeros_like(t)
-        # 0-4s: quiet backing harmony (amp 0.03)
-        samples[: sr * 4] = 0.03 * np.sin(2 * np.pi * 220.0 * t[: sr * 4])
+        # 0-4s: moderate-quiet intro backing harmony (amp 0.11)
+        samples[: sr * 4] = 0.11 * np.sin(2 * np.pi * 220.0 * t[: sr * 4])
         # 4-9s: strong lead vocal (amp 0.45)
         samples[sr * 4 : sr * 9] = 0.45 * np.sin(2 * np.pi * 330.0 * t[sr * 4 : sr * 9])
-        # 9-12s: quiet backing harmony (amp 0.03)
-        samples[sr * 9 :] = 0.03 * np.sin(2 * np.pi * 220.0 * t[sr * 9 :])
+        # 9-12s: quiet outro harmony (amp 0.08)
+        samples[sr * 9 :] = 0.08 * np.sin(2 * np.pi * 220.0 * t[sr * 9 :])
 
         regions = extract_lead_vocal_regions(samples, sr)
         self.assertEqual(len(regions), 1)
@@ -176,8 +176,7 @@ class TestPipelineSeam(unittest.TestCase):
         self.assertLessEqual(regions[0][1], 9.2)
 
         noisy_whisper_segs = [
-            {"start": 0.5, "end": 3.5, "text": "和聲誤判"},
-            {"start": 4.2, "end": 8.8, "text": "主唱段落"},
+            {"start": 1.0, "end": 8.8, "text": "橫跨前奏和聲與主唱"},
             {"start": 9.5, "end": 11.5, "text": "尾奏和聲"},
         ]
         aligned = align_plain_lyrics_to_segments(
