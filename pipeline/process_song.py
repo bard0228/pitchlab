@@ -411,16 +411,302 @@ def _clean_lyric_line(line: str) -> str:
     return cleaned.strip()
 
 
+def extract_vocal_sections_and_onsets(
+    samples: np.ndarray,
+    sample_rate: int,
+    hop_ms: int = 50,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float, float]]]:
+    """Detect macro vocal sections (split by >=4.5s interludes) and phrase onset candidates."""
+    if samples.size == 0 or sample_rate <= 0:
+        return [], []
+    mono = np.mean(samples, axis=1).astype(np.float32) if samples.ndim == 2 else samples.astype(np.float32)
+    hop_sec = hop_ms / 1000.0
+    hop = max(1, int(round(sample_rate * hop_sec)))
+    n_frames = int(np.ceil(len(mono) / hop))
+    rms = np.zeros(n_frames, dtype=np.float32)
+    for i in range(n_frames):
+        chunk = mono[i * hop : (i + 1) * hop]
+        if chunk.size > 0:
+            rms[i] = float(np.sqrt(np.mean(chunk * chunk)))
+
+    audible = rms[rms > 0.005]
+    if audible.size == 0:
+        return [], []
+    p95 = float(np.percentile(audible, 95))
+    lead_thresh = max(0.025, p95 * 0.38)
+    soft_thresh = max(0.015, p95 * 0.20)
+
+    active = rms >= lead_thresh
+    raw: list[tuple[float, float]] = []
+    st: int | None = None
+    for i, flag in enumerate(active):
+        if flag and st is None:
+            st = i
+        elif not flag and st is not None:
+            raw.append((st * hop_sec, i * hop_sec))
+            st = None
+    if st is not None:
+        raw.append((st * hop_sec, len(mono) / float(sample_rate)))
+
+    merged_small: list[tuple[float, float]] = []
+    for s, e in raw:
+        if merged_small and s - merged_small[-1][1] <= 0.55:
+            merged_small[-1] = (merged_small[-1][0], e)
+        else:
+            merged_small.append((s, e))
+    merged_small = [(s, e) for s, e in merged_small if (e - s) >= 0.65]
+    if not merged_small:
+        return [], []
+
+    kept_pre: list[tuple[float, float]] = []
+    for idx, (s, e) in enumerate(merged_small):
+        gp = s - (merged_small[idx - 1][1] if idx > 0 else 0.0)
+        gn = (merged_small[idx + 1][0] - e) if idx + 1 < len(merged_small) else 999.0
+        if (e - s) < 2.5 and gp >= 3.5 and gn >= 3.5:
+            continue
+        kept_pre.append((s, e))
+
+    sections: list[tuple[float, float]] = []
+    for s, e in (kept_pre or merged_small):
+        if sections and s - sections[-1][1] <= 4.5:
+            sections[-1] = (sections[-1][0], e)
+        else:
+            sections.append((s, e))
+
+    # Drop brief isolated outro/intro adlibs (<5.5s) when full vocal sections exist
+    long_secs = [sec for sec in sections if (sec[1] - sec[0]) >= 5.5]
+    if long_secs:
+        sections = long_secs
+
+    look_ahead = max(4, int(round(1.8 / hop_sec)))
+    look_back_peak = max(4, int(round(0.8 / hop_sec)))
+    look_back_min = max(2, int(round(0.2 / hop_sec)))
+    look_ahead_peak = max(3, int(round(0.3 / hop_sec)))
+    max_look_sil = max(10, int(round(4.0 / hop_sec)))
+
+    onsets: list[tuple[float, float, float]] = []
+    for i in range(2, max(2, n_frames - 4)):
+        prev_min = float(np.min(rms[max(0, i - look_back_min) : i]))
+        next_max = float(np.max(rms[i : min(n_frames, i + look_ahead_peak)]))
+        prev_peak = float(np.max(rms[max(0, i - look_back_peak) : max(1, i - 1)]))
+        is_sil = rms[i - 1] < soft_thresh and rms[i] >= soft_thresh and next_max >= lead_thresh
+        is_dip = (
+            prev_min < max(soft_thresh * 1.4, prev_peak * 0.52)
+            and rms[i] >= prev_min * 1.55
+            and next_max >= lead_thresh
+            and rms[i - 1] < rms[i]
+        )
+        if not (is_sil or is_dip):
+            continue
+
+        win = rms[i : min(n_frames, i + look_ahead)]
+        voiced_ahead = float(np.sum(win >= soft_thresh)) * hop_sec
+        if voiced_ahead < min(0.85, len(win) * hop_sec * 0.55):
+            continue
+
+        t_cand = i * hop_sec
+        dip_thresh = max(soft_thresh * 1.4, prev_peak * 0.52)
+        low_cnt = 0
+        k = i - 1
+        while k >= 0 and rms[k] < dip_thresh and low_cnt < max_look_sil:
+            low_cnt += 1
+            k -= 1
+        dip_sec = low_cnt * hop_sec
+
+        sil_cnt = 0
+        k = i - 1
+        while k >= 0 and rms[k] < soft_thresh and sil_cnt < max_look_sil:
+            sil_cnt += 1
+            k -= 1
+        sil_sec = sil_cnt * hop_sec
+
+        depth = 1.0 - min(1.0, prev_min / max(1e-6, prev_peak))
+        strength = (
+            (0.9 if is_sil else 0.25)
+            + 0.8 * depth
+            + min(1.6, dip_sec * 1.2)
+            + min(1.2, sil_sec * 0.7)
+        )
+        if not onsets or (t_cand - onsets[-1][0]) >= 0.60:
+            onsets.append((t_cand, strength, sil_sec))
+        elif strength > onsets[-1][1]:
+            onsets[-1] = (t_cand, strength, sil_sec)
+
+    return sections, onsets
+
+
+def _dp_align_items_to_sections(
+    items: list[dict],
+    sections: list[tuple[float, float]],
+    onsets: list[tuple[float, float, float]],
+) -> list[tuple[float, str]]:
+    import math
+
+    N = len(items)
+    S = len(sections)
+    sec_onsets: list[tuple[float, float, list[tuple[float, float, float]]]] = []
+    for s_start, s_end in sections:
+        cand = [(t, st, sil) for t, st, sil in onsets if (s_start - 0.4) <= t <= (s_end - 0.5)]
+        if not cand:
+            cand = [(s_start, 2.0, 2.0)]
+        sec_onsets.append((s_start, s_end, cand))
+
+    total_sec_dur = sum(max(1.0, e - s) for s, e, _ in sec_onsets)
+    if S == 1 or N < S:
+        sec_line_ranges = [(0, N)]
+        if S > 1 and N < S:
+            sec_onsets = [(sec_onsets[0][0], sec_onsets[-1][1], [c for _, _, cs in sec_onsets for c in cs])]
+    else:
+        total_w = sum(it["w"] for it in items)
+        cum_w = [0.0]
+        for it in items:
+            cum_w.append(cum_w[-1] + it["w"])
+        INF = 1e18
+        split_dp = [[(INF, -1)] * (N + 1) for _ in range(S + 1)]
+        split_dp[0][0] = (0.0, -1)
+        for si in range(1, S + 1):
+            target_frac = (sec_onsets[si - 1][1] - sec_onsets[si - 1][0]) / max(1e-6, total_sec_dur)
+            for end_i in range(si, N - (S - si) + 1):
+                for start_i in range(si - 1, end_i):
+                    prev_cost, _ = split_dp[si - 1][start_i]
+                    if prev_cost >= INF:
+                        continue
+                    grp_frac = (cum_w[end_i] - cum_w[start_i]) / max(1e-6, total_w)
+                    cost = ((grp_frac - target_frac) * 10.0) ** 2
+                    if si < S and not items[end_i - 1]["after_blank"]:
+                        cost += 0.5
+                    if prev_cost + cost < split_dp[si][end_i][0]:
+                        split_dp[si][end_i] = (prev_cost + cost, start_i)
+        splits = [N]
+        cur = N
+        for si in range(S, 0, -1):
+            cur = split_dp[si][cur][1]
+            splits.append(cur)
+        splits.reverse()
+        sec_line_ranges = [(splits[i], splits[i + 1]) for i in range(S)]
+
+    results: list[tuple[float, str]] = []
+    for (s_idx_start, s_idx_end), (s_start, s_end, cand) in zip(sec_line_ranges, sec_onsets):
+        sub_items = items[s_idx_start:s_idx_end]
+        K = len(sub_items)
+        M = len(cand)
+        if K == 0:
+            continue
+        if K == 1:
+            results.append((cand[0][0], sub_items[0]["text"]))
+            continue
+
+        sec_dur = max(1.0, s_end - s_start)
+        sub_w = sum(it["w"] for it in sub_items)
+        sec_per_unit = sec_dur / max(1e-6, sub_w)
+
+        if M < K:
+            acc = 0.0
+            for it in sub_items:
+                results.append((s_start + acc * sec_per_unit, it["text"]))
+                acc += it["w"]
+            continue
+
+        INF = 1e18
+        dp = [[INF] * M for _ in range(K)]
+        parent = [[-1] * M for _ in range(K)]
+        dp[0][0] = -0.60 * min(3.6, cand[0][1])
+        for m in range(1, min(M, 3)):
+            if cand[m][0] - cand[0][0] <= 1.2:
+                dp[0][m] = (cand[m][0] - cand[0][0]) * 4.0 - 0.60 * min(3.6, cand[m][1])
+
+        for i in range(1, K):
+            prev_it = sub_items[i - 1]
+            exp_dt = max(0.8, prev_it["w"] * sec_per_unit)
+            min_dt = min(1.2, max(0.35, exp_dt * 0.45))
+            max_allowed_gaps = max(0, prev_it["clauses"] - 1)
+            for m in range(i, M):
+                t_m, strength_m, _ = cand[m]
+                best_c = INF
+                best_p = -1
+                for p in range(i - 1, m):
+                    if dp[i - 1][p] >= INF:
+                        continue
+                    t_p = cand[p][0]
+                    dt = t_m - t_p
+                    if dt < min_dt or dt > exp_dt * 2.8:
+                        continue
+                    dur_cost = 4.6 * (math.log(dt / exp_dt) ** 2)
+                    skipped_sils = sorted(
+                        [cand[u][2] for u in range(p + 1, m) if cand[u][2] >= 0.35],
+                        reverse=True,
+                    )
+                    extra_sils = skipped_sils[max_allowed_gaps:]
+                    straddle_pen = sum(1.8 + 1.5 * s for s in extra_sils)
+                    onset_bonus = -0.60 * min(3.6, strength_m)
+                    c = dp[i - 1][p] + dur_cost + straddle_pen + onset_bonus
+                    if c < best_c:
+                        best_c = c
+                        best_p = p
+                dp[i][m] = best_c
+                parent[i][m] = best_p
+
+        w_last = sub_items[-1]["w"]
+        exp_last = max(0.8, w_last * sec_per_unit)
+        best_end_m = -1
+        best_end_c = INF
+        for m in range(K - 1, M):
+            if dp[K - 1][m] >= INF:
+                continue
+            tail = max(0.6, s_end - cand[m][0])
+            term_cost = 4.6 * (math.log(tail / exp_last) ** 2)
+            if dp[K - 1][m] + term_cost < best_end_c:
+                best_end_c = dp[K - 1][m] + term_cost
+                best_end_m = m
+
+        if best_end_m == -1:
+            acc = 0.0
+            for it in sub_items:
+                results.append((s_start + acc * sec_per_unit, it["text"]))
+                acc += it["w"]
+            continue
+
+        chosen = [0] * K
+        cur = best_end_m
+        for i in range(K - 1, -1, -1):
+            chosen[i] = cur
+            cur = parent[i][cur]
+        for i, m in enumerate(chosen):
+            results.append((cand[m][0], sub_items[i]["text"]))
+
+    return results
+
+
 def align_plain_lyrics_to_segments(
     plain_lines: list[str],
     segments: list[dict],
     duration_sec: float = 0.0,
     lead_regions: list[tuple[float, float]] | None = None,
+    vocal_samples: np.ndarray | None = None,
+    sample_rate: int = 48000,
 ) -> str:
-    cleaned = [_clean_lyric_line(line) for line in plain_lines]
-    cleaned = [line for line in cleaned if line]
-    if not cleaned:
+    items: list[dict] = []
+    for raw in plain_lines:
+        c = _clean_lyric_line(raw)
+        if not c:
+            if items:
+                items[-1]["after_blank"] = True
+            continue
+        chars = len(c.replace(" ", ""))
+        clauses = len(c.split())
+        w = 0.65 + 0.032 * chars + 0.04 * max(0, clauses - 1)
+        items.append({"text": c, "w": w, "clauses": clauses, "after_blank": False})
+    if not items:
         return ""
+
+    if vocal_samples is not None and vocal_samples.size > 0:
+        sections, onsets = extract_vocal_sections_and_onsets(vocal_samples, sample_rate)
+        if sections and onsets:
+            aligned = _dp_align_items_to_sections(items, sections, onsets)
+            if aligned:
+                return "\n".join(f"{format_lrc_timestamp(t)}{txt}" for t, txt in aligned) + "\n"
+
+    cleaned = [it["text"] for it in items]
 
     if lead_regions:
         valid_segs = list(lead_regions)
@@ -566,6 +852,8 @@ def process_audio_to_package(
                 [],
                 duration_sec=max(inst_dur_ms, voc_dur_ms) / 1000.0,
                 lead_regions=lead_regions,
+                vocal_samples=voc_samples,
+                sample_rate=sr,
             )
 
         meta = {

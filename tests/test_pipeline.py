@@ -189,6 +189,53 @@ class TestPipelineSeam(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertTrue(lines[0].startswith("[00:04."), f"Expected ~4s start, got {lines[0]}")
 
+    def test_dp_align_handles_breath_gaps_and_interludes(self):
+        sr = 16000
+        dur = 34.0
+        t = np.arange(int(sr * dur), dtype=np.float32) / sr
+        samples = np.zeros_like(t)
+        # 0-3s: quiet backing harmony (0.09)
+        samples[(t >= 0.0) & (t < 3.0)] = 0.09 * np.sin(2 * np.pi * 220.0 * t[(t >= 0.0) & (t < 3.0)])
+        # Part 1: 4 phrases separated by 0.45s..1.0s breath gaps (4s..16.5s)
+        # Part 2 after 5.5s interlude: 2 phrases (22s..29.5s)
+        phrases = [
+            (4.0, 6.2),   # line 1
+            (7.0, 9.2),   # line 2 (0.8s gap)
+            (9.65, 12.2), # line 3 (0.45s breath gap — must NOT merge & shift!)
+            (13.2, 16.5), # line 4
+            (22.0, 25.0), # line 5 (after 5.5s interlude)
+            (26.0, 29.5), # line 6
+        ]
+        for s, e in phrases:
+            m = (t >= s) & (t < e)
+            samples[m] = 0.45 * np.sin(2 * np.pi * 330.0 * t[m])
+
+        plain = [
+            "第一句尾班車 開向城",
+            "第二句深夜 只有雨聲",
+            "第三句緊接 換氣開唱",
+            "第四句這條路 無人陪行",
+            "",
+            "第五句間奏後 重回主唱",
+            "第六句最後 圓滿收尾",
+        ]
+        lrc = align_plain_lyrics_to_segments(
+            plain, [], duration_sec=dur, vocal_samples=samples, sample_rate=sr
+        )
+        parsed = []
+        for row in lrc.splitlines():
+            mm, rest = row[1:].split("]", 1)
+            mins, secs = mm.split(":")
+            parsed.append((int(mins) * 60 + float(secs), rest))
+        self.assertEqual(len(parsed), 6)
+        for idx, ((est_t, _), (true_s, _)) in enumerate(zip(parsed, phrases), 1):
+            self.assertAlmostEqual(
+                est_t,
+                true_s,
+                delta=0.6,
+                msg=f"Line {idx} drifted: expected ~{true_s:.2f}s, got {est_t:.2f}s",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
