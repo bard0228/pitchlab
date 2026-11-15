@@ -1,7 +1,13 @@
+html,
+body {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 .app-shell {
   width: 100%;
   max-width: 440px;
-  height: 100dvh;
+  height: 100%;
   margin: 0 auto;
   padding: 10px 14px 12px;
   display: flex;
@@ -292,10 +298,14 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 16px;
+  padding: 16px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.control-card > * {
+  flex-shrink: 0;
 }
 
 .slider-inset-right {

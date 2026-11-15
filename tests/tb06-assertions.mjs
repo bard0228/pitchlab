@@ -279,6 +279,36 @@ export default async function ({ page, assert }) {
       `Expected controls inside #control-card to scroll upward (before=${dockBefore.seekTop}, after=${dockAfter.seekTop})`
     );
 
+    // Simulate Android safe-area padding on body and scroll #control-card to the very bottom
+    const bottomButtonsVisible = await page.evaluate(() => {
+      document.body.style.paddingTop = '48px';
+      document.body.style.paddingBottom = '24px';
+      const ctrl = document.getElementById('control-card');
+      ctrl.scrollTop = ctrl.scrollHeight;
+      const ctrlRect = ctrl.getBoundingClientRect();
+      const upSong = document.querySelector('.upload-song-btn').getBoundingClientRect();
+      const upLrc = document.querySelector('.upload-lrc-btn').getBoundingClientRect();
+      return {
+        innerH: window.innerHeight,
+        ctrlBottom: Math.round(ctrlRect.bottom),
+        songBottom: Math.round(upSong.bottom),
+        lrcBottom: Math.round(upLrc.bottom),
+        songHeight: Math.round(upSong.height),
+        lrcHeight: Math.round(upLrc.height),
+      };
+    });
+    assert(
+      bottomButtonsVisible.ctrlBottom <= bottomButtonsVisible.innerH - 24,
+      `Expected #control-card bottom <= innerHeight - 24px, got ctrlBottom=${bottomButtonsVisible.ctrlBottom}, innerH=${bottomButtonsVisible.innerH}`
+    );
+    assert(
+      bottomButtonsVisible.songBottom <= bottomButtonsVisible.ctrlBottom &&
+        bottomButtonsVisible.lrcBottom <= bottomButtonsVisible.ctrlBottom &&
+        bottomButtonsVisible.songHeight >= 48 &&
+        bottomButtonsVisible.lrcHeight >= 48,
+      `Expected bottom upload buttons fully visible and >= 48px tall: ${JSON.stringify(bottomButtonsVisible)}`
+    );
+
     // Test slider insets to avoid accidental edge touches
     const insetCheck = await page.evaluate(() => {
       const scrubCol = document.querySelector('.scrub-col').getBoundingClientRect();
