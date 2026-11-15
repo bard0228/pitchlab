@@ -8,8 +8,8 @@
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/png" href="./assets/icon-192.png" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
-  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=12" />
-  <link rel="stylesheet" href="./styles/app.css?v=12" />
+  <link rel="stylesheet" href="./styles/liquid-glass-kit.css?v=13" />
+  <link rel="stylesheet" href="./styles/app.css?v=13" />
 </head>
 <body>
   <div class="lg-ambient-bg" aria-hidden="true"></div>
@@ -213,14 +213,24 @@
             <span id="label-import-zip">匯入歌包 (.zip)</span>
             <input id="file-zip" class="sr-only" type="file" />
           </label>
-          <a id="link-colab" class="lg-btn lg-glass-btn colab-link-btn" href="https://colab.research.google.com/github/bard0228/pitchlab/blob/main/pipeline/PitchLab_Colab.ipynb" target="_blank" rel="noopener noreferrer">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            <span>開啟雲端 AI 精準分軌</span>
-          </a>
+          <div class="portal-tools-row">
+            <a id="link-download-tool" class="lg-btn lg-glass-btn portal-tool-btn" href="https://cnvmp3.com/v55" target="_blank" rel="noopener noreferrer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>音樂下載工具</span>
+            </a>
+            <a id="link-colab" class="lg-btn lg-glass-btn portal-tool-btn colab-link-btn" href="https://colab.research.google.com/github/bard0228/pitchlab/blob/main/pipeline/PitchLab_Colab.ipynb" target="_blank" rel="noopener noreferrer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              <span>AI分軌工具</span>
+            </a>
+          </div>
         </div>
 
         <div class="cloud-sync-row">

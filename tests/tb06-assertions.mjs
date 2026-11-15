@@ -110,6 +110,38 @@ export default async function ({ page, assert }) {
     assert(libStyle.hasSyncUrl, 'Expected #sync-url-input inside library modal');
     assert(libStyle.hasSyncBtn, 'Expected #btn-cloud-sync inside library modal');
     assert(libStyle.listMaxH === '292px', `Expected #song-list maxHeight 292px (5 songs), got ${libStyle.listMaxH}`);
+
+    await page.click('#btn-library');
+    await new Promise((r) => setTimeout(r, 400));
+    const portalLayout = await page.evaluate(() => {
+      const box = (el) => {
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height };
+      };
+      const imp = document.querySelector('.import-zip-btn');
+      const dl = document.getElementById('link-download-tool');
+      const ai = document.getElementById('link-colab');
+      return {
+        imp: box(imp),
+        dl: box(dl),
+        ai: box(ai),
+        dlHref: dl.getAttribute('href'),
+        dlTarget: dl.getAttribute('target'),
+        dlText: dl.textContent.trim(),
+        aiTarget: ai.getAttribute('target'),
+        aiText: ai.textContent.trim(),
+      };
+    });
+    assert(portalLayout.dlHref === 'https://cnvmp3.com/v55', `Unexpected download tool href: ${portalLayout.dlHref}`);
+    assert(portalLayout.dlTarget === '_blank' && portalLayout.aiTarget === '_blank', 'Expected external target="_blank" on both tool buttons');
+    assert(portalLayout.dlText === '音樂下載工具', `Expected "音樂下載工具", got "${portalLayout.dlText}"`);
+    assert(portalLayout.aiText === 'AI分軌工具', `Expected "AI分軌工具", got "${portalLayout.aiText}"`);
+    assert(portalLayout.dl.top >= portalLayout.imp.bottom - 1, 'Expected row 2 tools below row 1 import-zip-btn');
+    assert(Math.abs(portalLayout.dl.top - portalLayout.ai.top) < 4, 'Expected 音樂下載工具 and AI分軌工具 on the same row');
+    assert(portalLayout.dl.right <= portalLayout.ai.left, 'Expected 音樂下載工具 on left and AI分軌工具 on right without overlap');
+    assert(portalLayout.dl.height >= 48 && portalLayout.ai.height >= 48, 'Expected >= 48px touch target height for both tool buttons');
+    await page.click('#btn-library-close');
+    await new Promise((r) => setTimeout(r, 120));
     assert(Math.abs(rowCheck.sBack.top - rowCheck.sFwd.top) < 4 && Math.abs(rowCheck.sBack.top - rowCheck.sLoop.top) < 4, 'Transport extras must be in 1 horizontal row');
     assert(Math.abs(rowCheck.abA.top - rowCheck.abB.top) < 4 && Math.abs(rowCheck.abA.top - rowCheck.abC.top) < 4, 'AB buttons must be in 1 horizontal row');
     assert(Math.abs(rowCheck.upSong.top - rowCheck.upLrc.top) < 4 && rowCheck.upSong.right <= rowCheck.upLrc.left, 'Upload buttons must be side-by-side without overlap');
