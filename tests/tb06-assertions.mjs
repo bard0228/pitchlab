@@ -37,7 +37,15 @@ export default async function ({ page, assert }) {
   createTestWav(wavPath, 25.0, 261.6256);
   fs.writeFileSync(
     lrcPath,
-    ['[00:02.00]第一句歌詞測試', '[00:10.00]第二句副歌開始', '[00:18.00]第三句結尾測試'].join('\n'),
+    [
+      '[00:02.00]第一句歌詞測試',
+      '[00:10.00]第二句副歌開始',
+      '[00:18.00]第三句結尾測試',
+      '[00:19.50]第四句後續預覽',
+      '[00:21.00]第五句手動點擊測試',
+      '[00:22.50]第六句延續歌詞',
+      '[00:24.00]第七句最後結尾',
+    ].join('\n'),
     'utf-8'
   );
 
@@ -192,6 +200,112 @@ export default async function ({ page, assert }) {
     assert(
       lyricState.next === '第三句結尾測試',
       `Expected #lyric-next to be "第三句結尾測試", got "${lyricState.next}"`
+    );
+
+    // Test scrollable #lyric-list & tap-to-sync
+    const lyricScrollCheck = await page.evaluate(() => {
+      const list = document.getElementById('lyric-list');
+      list.scrollTop = list.scrollHeight;
+      return {
+        overflowY: getComputedStyle(list).overflowY,
+        scrollHeight: list.scrollHeight,
+        clientHeight: list.clientHeight,
+        scrollTop: list.scrollTop,
+        btnCount: list.querySelectorAll('.lyric-line-btn').length,
+      };
+    });
+    assert(
+      lyricScrollCheck.overflowY === 'auto' && lyricScrollCheck.scrollHeight > lyricScrollCheck.clientHeight,
+      `Expected #lyric-list to be scrollable (overflowY=${lyricScrollCheck.overflowY}, scrollH=${lyricScrollCheck.scrollHeight}, clientH=${lyricScrollCheck.clientHeight})`
+    );
+    assert(lyricScrollCheck.scrollTop > 0, `Expected #lyric-list scrollTop > 0, got ${lyricScrollCheck.scrollTop}`);
+    assert(lyricScrollCheck.btnCount === 8, `Expected 8 lyric buttons (prep + 7 lines), got ${lyricScrollCheck.btnCount}`);
+
+    await page.click('.lyric-line-btn[data-lyric-idx="4"]');
+    await new Promise((r) => setTimeout(r, 80));
+    const tapSyncResult = await page.evaluate(() => ({
+      cur: document.getElementById('lyric-current')?.textContent.trim(),
+      offsetVal: document.getElementById('lyric-offset-value')?.textContent.trim(),
+    }));
+    assert(
+      tapSyncResult.cur === '第五句手動點擊測試',
+      `Expected tapped line to become #lyric-current ("第五句手動點擊測試"), got "${tapSyncResult.cur}"`
+    );
+    assert(
+      tapSyncResult.offsetVal === '-10.0 秒',
+      `Expected lyric offset to become "-10.0 秒", got "${tapSyncResult.offsetVal}"`
+    );
+
+    // Test frozen dock pinning while scrolling #control-card
+    const dockBefore = await page.evaluate(() => {
+      const dock = document.getElementById('frozen-dock').getBoundingClientRect();
+      const ctrl = document.getElementById('control-card');
+      const seekRect = document.getElementById('btn-seek-back').getBoundingClientRect();
+      return {
+        dockTop: dock.top,
+        dockBottom: dock.bottom,
+        ctrlOverflowY: getComputedStyle(ctrl).overflowY,
+        ctrlScrollH: ctrl.scrollHeight,
+        ctrlClientH: ctrl.clientHeight,
+        seekTop: seekRect.top,
+      };
+    });
+    assert(
+      dockBefore.ctrlOverflowY === 'auto' && dockBefore.ctrlScrollH > dockBefore.ctrlClientH,
+      `Expected #control-card to scroll independently (overflowY=${dockBefore.ctrlOverflowY}, scrollH=${dockBefore.ctrlScrollH}, clientH=${dockBefore.ctrlClientH})`
+    );
+    await page.evaluate(() => {
+      document.getElementById('control-card').scrollTop = 180;
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    const dockAfter = await page.evaluate(() => {
+      const dock = document.getElementById('frozen-dock').getBoundingClientRect();
+      const seekRect = document.getElementById('btn-seek-back').getBoundingClientRect();
+      return {
+        dockTop: dock.top,
+        dockBottom: dock.bottom,
+        ctrlScrollTop: document.getElementById('control-card').scrollTop,
+        seekTop: seekRect.top,
+      };
+    });
+    assert(dockAfter.ctrlScrollTop > 0, `Expected #control-card scrollTop > 0, got ${dockAfter.ctrlScrollTop}`);
+    assert(
+      Math.abs(dockAfter.dockTop - dockBefore.dockTop) < 1 &&
+        Math.abs(dockAfter.dockBottom - dockBefore.dockBottom) < 1,
+      `Frozen dock moved on scroll! before=(${dockBefore.dockTop},${dockBefore.dockBottom}) after=(${dockAfter.dockTop},${dockAfter.dockBottom})`
+    );
+    assert(
+      dockAfter.seekTop < dockBefore.seekTop - 50,
+      `Expected controls inside #control-card to scroll upward (before=${dockBefore.seekTop}, after=${dockAfter.seekTop})`
+    );
+
+    // Test slider insets to avoid accidental edge touches
+    const insetCheck = await page.evaluate(() => {
+      const scrubCol = document.querySelector('.scrub-col').getBoundingClientRect();
+      const scrubBar = document.getElementById('scrub-bar').getBoundingClientRect();
+      const vocalSlider = document.getElementById('vocal-gain').getBoundingClientRect();
+      const vocalBlock = document.getElementById('vocal-gain').closest('.slider-block').getBoundingClientRect();
+      const latSlider = document.getElementById('latency-offset').getBoundingClientRect();
+      const latBlock = document.getElementById('latency-offset').closest('.slider-block').getBoundingClientRect();
+      return {
+        scrubRightInset: Math.round(scrubCol.right - scrubBar.right),
+        vocalLeftInset: Math.round(vocalSlider.left - vocalBlock.left),
+        vocalRightInset: Math.round(vocalBlock.right - vocalSlider.right),
+        latLeftInset: Math.round(latSlider.left - latBlock.left),
+        latRightInset: Math.round(latBlock.right - latSlider.right),
+      };
+    });
+    assert(
+      insetCheck.scrubRightInset >= 24,
+      `Expected #scrub-bar right inset >= 24px, got ${insetCheck.scrubRightInset}px`
+    );
+    assert(
+      insetCheck.vocalLeftInset >= 24 && insetCheck.vocalRightInset >= 24,
+      `Expected #vocal-gain left/right insets >= 24px, got L=${insetCheck.vocalLeftInset}px R=${insetCheck.vocalRightInset}px`
+    );
+    assert(
+      insetCheck.latLeftInset >= 24 && insetCheck.latRightInset >= 24,
+      `Expected #latency-offset left/right insets >= 24px, got L=${insetCheck.latLeftInset}px R=${insetCheck.latRightInset}px`
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

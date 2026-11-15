@@ -60,9 +60,8 @@ const elBtnLyricLateHalf = document.getElementById('btn-lyric-late-half');
 const elBtnLyricLate1 = document.getElementById('btn-lyric-late-1');
 const elMicError = document.getElementById('mic-error');
 const elLyricOverlay = document.getElementById('lyric-overlay');
-const elLyricPrev = document.getElementById('lyric-prev');
-const elLyricCurrent = document.getElementById('lyric-current');
-const elLyricNext = document.getElementById('lyric-next');
+const elLyricList = document.getElementById('lyric-list');
+const elControlCard = document.getElementById('control-card');
 const elHudLive = document.getElementById('hud-live');
 const elHudCents = document.getElementById('hud-cents');
 const elHudAccuracy = document.getElementById('hud-accuracy');
@@ -87,6 +86,8 @@ let currentSongId = null;
 let currentMelody = [];
 let currentPitchCurve = null;
 let currentLyrics = [];
+let lastActiveLyricIdx = -999;
+let lyricUserBrowsingUntil = 0;
 let isScrubbing = false;
 let octaveAgnostic = true;
 let audioMode = 'headphone';
@@ -161,14 +162,15 @@ function updateLatencyUI(ms) {
 updateLatencyUI(latencyOffsetMs);
 
 function formatLyricOffsetLabel(sec) {
-  const rounded = Math.round(sec * 2) / 2;
-  if (Math.abs(rounded) < 0.01) return '0.0 秒';
+  const rounded = Math.round(sec * 100) / 100;
+  if (Math.abs(rounded) < 0.005) return '0.0 秒';
   const sign = rounded > 0 ? '+' : '';
-  return `${sign}${rounded.toFixed(1)} 秒`;
+  const absTenths = Math.abs(rounded * 10 - Math.round(rounded * 10));
+  return `${sign}${rounded.toFixed(absTenths < 0.01 ? 1 : 2)} 秒`;
 }
 
 function setLyricOffset(sec, persist = true) {
-  lyricOffsetSec = Math.max(-30, Math.min(30, Math.round(sec * 2) / 2));
+  lyricOffsetSec = Math.max(-300, Math.min(300, Math.round(sec * 100) / 100));
   if (elLyricOffsetVal) {
     elLyricOffsetVal.textContent = formatLyricOffsetLabel(lyricOffsetSec);
   }
@@ -208,26 +210,127 @@ function clearAbLoop() {
   updateAbUI();
 }
 
+function renderLyricList() {
+  lastActiveLyricIdx = -999;
+  elLyricList.innerHTML = '';
+  if (!currentLyrics || currentLyrics.length === 0) {
+    return;
+  }
+
+  const srPrev = document.createElement('span');
+  srPrev.className = 'lyric-line-sr';
+  srPrev.dataset.srFallback = 'prev';
+  elLyricList.appendChild(srPrev);
+
+  const prepBtn = document.createElement('button');
+  prepBtn.type = 'button';
+  prepBtn.className = 'lyric-line-btn is-prep';
+  prepBtn.dataset.lyricIdx = '-1';
+  prepBtn.textContent = '♪ 準備演唱';
+  elLyricList.appendChild(prepBtn);
+
+  currentLyrics.forEach((line, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'lyric-line-btn';
+    btn.dataset.lyricIdx = String(i);
+    btn.textContent = line.text;
+    btn.setAttribute('role', 'option');
+    elLyricList.appendChild(btn);
+  });
+
+  const srNext = document.createElement('span');
+  srNext.className = 'lyric-line-sr';
+  srNext.dataset.srFallback = 'next';
+  elLyricList.appendChild(srNext);
+}
+
+const pauseLyricAutoScroll = () => {
+  lyricUserBrowsingUntil = performance.now() + 3500;
+};
+elLyricList?.addEventListener('pointerdown', pauseLyricAutoScroll, { passive: true });
+elLyricList?.addEventListener('touchstart', pauseLyricAutoScroll, { passive: true });
+elLyricList?.addEventListener('wheel', pauseLyricAutoScroll, { passive: true });
+
+elLyricList?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.lyric-line-btn');
+  if (!btn) return;
+  const idx = Number(btn.dataset.lyricIdx);
+  if (!Number.isInteger(idx) || idx < 0 || !currentLyrics[idx]) return;
+  lyricUserBrowsingUntil = 0;
+  lastActiveLyricIdx = -999;
+  const targetLine = currentLyrics[idx];
+  const nowSec = engine.getCurrentTime();
+  let nextOffset = Math.round((nowSec - targetLine.timeSec) * 100) / 100;
+  if (nowSec - nextOffset < targetLine.timeSec) {
+    nextOffset = Math.round((nextOffset - 0.01) * 100) / 100;
+  }
+  setLyricOffset(nextOffset, true);
+});
+
 function updateLyricDisplay(nowSec) {
   if (!currentLyrics || currentLyrics.length === 0) {
     elLyricOverlay.hidden = true;
     elLyricOverlay.style.display = 'none';
-    elLyricPrev.textContent = '';
-    elLyricCurrent.textContent = '';
-    elLyricNext.textContent = '';
+    lastActiveLyricIdx = -999;
     return;
   }
   elLyricOverlay.hidden = false;
   elLyricOverlay.style.display = 'flex';
   const idx = findActiveLyricIndex(currentLyrics, nowSec - lyricOffsetSec);
+  if (idx === lastActiveLyricIdx) return;
+  lastActiveLyricIdx = idx;
+
+  for (const prevEl of elLyricList.querySelectorAll('#lyric-prev, #lyric-current, #lyric-next')) {
+    prevEl.removeAttribute('id');
+  }
+  for (const actEl of elLyricList.querySelectorAll('.lyric-line-btn.is-active')) {
+    actEl.classList.remove('is-active');
+    actEl.setAttribute('aria-selected', 'false');
+  }
+
+  const prepBtn = elLyricList.querySelector('.lyric-line-btn[data-lyric-idx="-1"]');
+  const srPrev = elLyricList.querySelector('[data-sr-fallback="prev"]');
+  const srNext = elLyricList.querySelector('[data-sr-fallback="next"]');
+
   if (idx === -1) {
-    elLyricPrev.textContent = '';
-    elLyricCurrent.textContent = '♪ 準備演唱';
-    elLyricNext.textContent = currentLyrics[0]?.text || '';
+    if (srPrev) srPrev.id = 'lyric-prev';
+    if (prepBtn) {
+      prepBtn.id = 'lyric-current';
+      prepBtn.classList.add('is-active');
+      prepBtn.setAttribute('aria-selected', 'true');
+    }
+    const firstBtn = elLyricList.querySelector('.lyric-line-btn[data-lyric-idx="0"]');
+    if (firstBtn) firstBtn.id = 'lyric-next';
   } else {
-    elLyricPrev.textContent = currentLyrics[idx - 1]?.text || '';
-    elLyricCurrent.textContent = currentLyrics[idx].text;
-    elLyricNext.textContent = currentLyrics[idx + 1]?.text || '';
+    const prevBtn = idx > 0 ? elLyricList.querySelector(`.lyric-line-btn[data-lyric-idx="${idx - 1}"]`) : null;
+    const curBtn = elLyricList.querySelector(`.lyric-line-btn[data-lyric-idx="${idx}"]`);
+    const nextBtn = idx + 1 < currentLyrics.length
+      ? elLyricList.querySelector(`.lyric-line-btn[data-lyric-idx="${idx + 1}"]`)
+      : null;
+
+    if (prevBtn) prevBtn.id = 'lyric-prev';
+    else if (srPrev) srPrev.id = 'lyric-prev';
+
+    if (curBtn) {
+      curBtn.id = 'lyric-current';
+      curBtn.classList.add('is-active');
+      curBtn.setAttribute('aria-selected', 'true');
+    }
+
+    if (nextBtn) nextBtn.id = 'lyric-next';
+    else if (srNext) srNext.id = 'lyric-next';
+  }
+
+  if (performance.now() >= lyricUserBrowsingUntil) {
+    const activeEl = elLyricList.querySelector('#lyric-current');
+    if (activeEl) {
+      const targetTop = Math.max(
+        0,
+        activeEl.offsetTop - elLyricList.clientHeight / 2 + activeEl.offsetHeight / 2
+      );
+      elLyricList.scrollTop = targetTop;
+    }
   }
 }
 
@@ -242,6 +345,7 @@ async function loadSavedSong(record) {
   currentPitchCurve = record.pitchCurve || null;
   currentMelody = quantizePitchCurveToNotes(currentPitchCurve);
   currentLyrics = parseLrc(record.lyricsText || '');
+  renderLyricList();
   elLabelUploadLrc.textContent = currentLyrics.length > 0 ? '已載入歌詞' : '匯入歌詞 (.lrc)';
   clearAbLoop();
   resetStatsAndTrail();
@@ -698,6 +802,7 @@ elFileSong.addEventListener('change', async (e) => {
     currentPitchCurve = pitchCurve;
     currentMelody = quantizePitchCurveToNotes(pitchCurve);
     currentLyrics = [];
+    renderLyricList();
     elLabelUploadLrc.textContent = '匯入歌詞 (.lrc)';
     clearAbLoop();
     resetStatsAndTrail();
@@ -730,6 +835,7 @@ elFileLrc.addEventListener('change', async (e) => {
     }
     showMicError('');
     currentLyrics = parsed;
+    renderLyricList();
     elLabelUploadLrc.textContent = `歌詞：${file.name.replace(/\.[^.]+$/, '')}`;
     updateLyricDisplay(engine.getCurrentTime());
 
@@ -973,8 +1079,8 @@ function drawStage() {
 }
 
 attachAndroidEdgeStretch(
-  document.scrollingElement || document.documentElement,
-  document.getElementById('app-shell')
+  elControlCard || document.scrollingElement || document.documentElement,
+  elControlCard || document.getElementById('app-shell')
 );
 restoreLastSavedSongIfAny()
   .then(() => runCloudSync(false))
