@@ -161,6 +161,33 @@ function updateLatencyUI(ms) {
 
 updateLatencyUI(latencyOffsetMs);
 
+function bindSliderLockToggle(wrapId, unlockBtnId, lockBtnId, inputId) {
+  const wrap = document.getElementById(wrapId);
+  const unlockBtn = document.getElementById(unlockBtnId);
+  const lockBtn = document.getElementById(lockBtnId);
+  const input = document.getElementById(inputId);
+  if (!wrap || !unlockBtn || !lockBtn || !input) return;
+
+  const setUnlocked = (unlocked) => {
+    wrap.classList.toggle('is-locked', !unlocked);
+    input.disabled = !unlocked;
+    input.setAttribute('aria-disabled', unlocked ? 'false' : 'true');
+
+    unlockBtn.hidden = unlocked;
+    unlockBtn.style.display = unlocked ? 'none' : 'grid';
+
+    lockBtn.hidden = !unlocked;
+    lockBtn.style.display = unlocked ? 'grid' : 'none';
+  };
+
+  setUnlocked(false);
+  unlockBtn.addEventListener('click', () => setUnlocked(true));
+  lockBtn.addEventListener('click', () => setUnlocked(false));
+}
+
+bindSliderLockToggle('vocal-gain-wrap', 'btn-unlock-vocal-gain', 'btn-lock-vocal-gain', 'vocal-gain');
+bindSliderLockToggle('latency-wrap', 'btn-unlock-latency', 'btn-lock-latency', 'latency-offset');
+
 function formatLyricOffsetLabel(sec) {
   const rounded = Math.round(sec * 100) / 100;
   if (Math.abs(rounded) < 0.005) return '0.0 秒';

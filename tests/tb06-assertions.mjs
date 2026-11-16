@@ -341,33 +341,98 @@ export default async function ({ page, assert }) {
       `Expected bottom upload buttons fully visible and >= 48px tall: ${JSON.stringify(bottomButtonsVisible)}`
     );
 
-    // Test slider insets to avoid accidental edge touches
-    const insetCheck = await page.evaluate(() => {
+    // Test #scrub-bar right inset and lock/unlock slider flow for #vocal-gain & #latency-offset
+    const initialLockState = await page.evaluate(() => {
       const scrubCol = document.querySelector('.scrub-col').getBoundingClientRect();
       const scrubBar = document.getElementById('scrub-bar').getBoundingClientRect();
-      const vocalSlider = document.getElementById('vocal-gain').getBoundingClientRect();
-      const vocalBlock = document.getElementById('vocal-gain').closest('.slider-block').getBoundingClientRect();
-      const latSlider = document.getElementById('latency-offset').getBoundingClientRect();
-      const latBlock = document.getElementById('latency-offset').closest('.slider-block').getBoundingClientRect();
+      const uv = document.getElementById('btn-unlock-vocal-gain');
+      const ul = document.getElementById('btn-unlock-latency');
+      const vgInput = document.getElementById('vocal-gain');
+      const ltInput = document.getElementById('latency-offset');
+      const vgLockBtn = document.getElementById('btn-lock-vocal-gain');
+      const ltLockBtn = document.getElementById('btn-lock-latency');
+      const uvRect = uv.getBoundingClientRect();
+      const vgRect = vgInput.getBoundingClientRect();
+      const centerDiffX = Math.abs((uvRect.left + uvRect.width / 2) - (vgRect.left + vgRect.width / 2));
       return {
         scrubRightInset: Math.round(scrubCol.right - scrubBar.right),
-        vocalLeftInset: Math.round(vocalSlider.left - vocalBlock.left),
-        vocalRightInset: Math.round(vocalBlock.right - vocalSlider.right),
-        latLeftInset: Math.round(latSlider.left - latBlock.left),
-        latRightInset: Math.round(latBlock.right - latSlider.right),
+        uvVisible: getComputedStyle(uv).display !== 'none' && uvRect.height >= 48,
+        ulVisible: getComputedStyle(ul).display !== 'none' && ul.getBoundingClientRect().height >= 48,
+        centerDiffX,
+        vgDisabled: vgInput.disabled,
+        ltDisabled: ltInput.disabled,
+        vgLockHidden: vgLockBtn.hidden && getComputedStyle(vgLockBtn).display === 'none',
+        ltLockHidden: ltLockBtn.hidden && getComputedStyle(ltLockBtn).display === 'none',
       };
     });
     assert(
-      insetCheck.scrubRightInset >= 24,
-      `Expected #scrub-bar right inset >= 24px, got ${insetCheck.scrubRightInset}px`
+      initialLockState.scrubRightInset >= 24,
+      `Expected #scrub-bar right inset >= 24px, got ${initialLockState.scrubRightInset}px`
     );
     assert(
-      insetCheck.vocalLeftInset >= 24 && insetCheck.vocalRightInset >= 24,
-      `Expected #vocal-gain left/right insets >= 24px, got L=${insetCheck.vocalLeftInset}px R=${insetCheck.vocalRightInset}px`
+      initialLockState.uvVisible && initialLockState.ulVisible && initialLockState.vgDisabled && initialLockState.ltDisabled,
+      `Expected sliders initially locked and center unlock buttons visible: ${JSON.stringify(initialLockState)}`
     );
     assert(
-      insetCheck.latLeftInset >= 24 && insetCheck.latRightInset >= 24,
-      `Expected #latency-offset left/right insets >= 24px, got L=${insetCheck.latLeftInset}px R=${insetCheck.latRightInset}px`
+      initialLockState.centerDiffX < 6,
+      `Expected unlock icon centered over the slider track (diffX=${initialLockState.centerDiffX}px)`
+    );
+    assert(
+      initialLockState.vgLockHidden && initialLockState.ltLockHidden,
+      'Expected right-edge lock buttons hidden while locked'
+    );
+
+    await page.click('#btn-unlock-vocal-gain');
+    await page.click('#btn-unlock-latency');
+    await new Promise((r) => setTimeout(r, 80));
+
+    const unlockedCheck = await page.evaluate(() => {
+      const vocalSlider = document.getElementById('vocal-gain').getBoundingClientRect();
+      const vocalLock = document.getElementById('btn-lock-vocal-gain').getBoundingClientRect();
+      const vocalBlock = document.getElementById('vocal-gain').closest('.slider-block').getBoundingClientRect();
+      const latSlider = document.getElementById('latency-offset').getBoundingClientRect();
+      const latLock = document.getElementById('btn-lock-latency').getBoundingClientRect();
+      const latBlock = document.getElementById('latency-offset').closest('.slider-block').getBoundingClientRect();
+      const uv = document.getElementById('btn-unlock-vocal-gain');
+      const ul = document.getElementById('btn-unlock-latency');
+      const vgInput = document.getElementById('vocal-gain');
+      const ltInput = document.getElementById('latency-offset');
+      return {
+        vocalLeftInset: Math.round(vocalSlider.left - vocalBlock.left),
+        vocalRightOfSlider: vocalLock.left >= vocalSlider.right - 2,
+        vocalLockSizeOk: vocalLock.width >= 48 && vocalLock.height >= 48,
+        latLeftInset: Math.round(latSlider.left - latBlock.left),
+        latRightOfSlider: latLock.left >= latSlider.right - 2,
+        latLockSizeOk: latLock.width >= 48 && latLock.height >= 48,
+        uvHidden: uv.hidden && getComputedStyle(uv).display === 'none',
+        ulHidden: ul.hidden && getComputedStyle(ul).display === 'none',
+        vgEnabled: !vgInput.disabled,
+        ltEnabled: !ltInput.disabled,
+      };
+    });
+    assert(
+      unlockedCheck.vocalLeftInset >= 18 && unlockedCheck.vocalRightOfSlider && unlockedCheck.vocalLockSizeOk && unlockedCheck.vgEnabled && unlockedCheck.uvHidden,
+      `Vocal slider unlocked layout invalid: ${JSON.stringify(unlockedCheck)}`
+    );
+    assert(
+      unlockedCheck.latLeftInset >= 18 && unlockedCheck.latRightOfSlider && unlockedCheck.latLockSizeOk && unlockedCheck.ltEnabled && unlockedCheck.ulHidden,
+      `Latency slider unlocked layout invalid: ${JSON.stringify(unlockedCheck)}`
+    );
+
+    await page.click('#btn-lock-vocal-gain');
+    await page.click('#btn-lock-latency');
+    await new Promise((r) => setTimeout(r, 80));
+    const relocked = await page.evaluate(() => ({
+      vgDisabled: document.getElementById('vocal-gain').disabled,
+      ltDisabled: document.getElementById('latency-offset').disabled,
+      uvVisible: !document.getElementById('btn-unlock-vocal-gain').hidden,
+      ulVisible: !document.getElementById('btn-unlock-latency').hidden,
+      vgLockHidden: document.getElementById('btn-lock-vocal-gain').hidden,
+      ltLockHidden: document.getElementById('btn-lock-latency').hidden,
+    }));
+    assert(
+      relocked.vgDisabled && relocked.ltDisabled && relocked.uvVisible && relocked.ulVisible && relocked.vgLockHidden && relocked.ltLockHidden,
+      `Expected sliders to re-lock cleanly: ${JSON.stringify(relocked)}`
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
