@@ -281,7 +281,7 @@ function parseCliArgs(argv) {
   return opts;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runVerification(parseCliArgs(process.argv.slice(2)))
     .then((res) => {
       console.log(

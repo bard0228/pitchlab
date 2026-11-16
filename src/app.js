@@ -605,6 +605,30 @@ async function runCloudSync(showFeedback = false) {
   return cloudSyncPromise;
 }
 
+function openExternalUrl(url) {
+  if (!url) return;
+  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  if (w && typeof w.focus === 'function') {
+    try {
+      w.focus();
+    } catch (_) {}
+  }
+}
+
+const elLinkDownloadTool = document.getElementById('link-download-tool');
+const elLinkColab = document.getElementById('link-colab');
+elLinkDownloadTool?.addEventListener('click', (e) => {
+  e.preventDefault();
+  openExternalUrl(elLinkDownloadTool.getAttribute('href') || 'https://cnvmp3.com/v55');
+});
+elLinkColab?.addEventListener('click', (e) => {
+  e.preventDefault();
+  openExternalUrl(
+    elLinkColab.getAttribute('href') ||
+      'https://colab.research.google.com/github/bard0228/pitchlab/blob/main/pipeline/PitchLab_Colab.ipynb'
+  );
+});
+
 elBtnLibrary.addEventListener('click', openLibraryModal);
 elBtnLibraryClose.addEventListener('click', closeLibraryModal);
 elSongSearch.addEventListener('input', () => {

@@ -59,6 +59,11 @@ export default async function ({ page, assert }) {
     assert(playingIcons.playDisplay === 'none', `Expected #icon-play hidden while playing, got ${playingIcons.playDisplay}`);
     assert(playingIcons.pauseDisplay !== 'none', `Expected #icon-pause visible while playing, got ${playingIcons.pauseDisplay}`);
 
+    const unlockBtn = await page.$('#btn-unlock-vocal-gain');
+    if (unlockBtn) {
+      await unlockBtn.click();
+      await new Promise((r) => setTimeout(r, 60));
+    }
     await page.$eval('#vocal-gain', (el) => {
       el.value = '35';
       el.dispatchEvent(new Event('input', { bubbles: true }));
